@@ -7,6 +7,7 @@ set -euo pipefail
 : "${TALER_MERCHANT_DB_USER:=taler}"
 : "${TALER_MERCHANT_DB_PASSWORD:=taler}"
 : "${TALER_MERCHANT_DB_NAME:=taler-merchant}"
+: "${TALER_MERCHANT_BASE_URL:=http://localhost:${TALER_MERCHANT_PORT}/}"
 
 export TALER_MERCHANT_PORT
 export TALER_MERCHANT_DB_HOST
@@ -14,6 +15,7 @@ export TALER_MERCHANT_DB_PORT
 export TALER_MERCHANT_DB_USER
 export TALER_MERCHANT_DB_PASSWORD
 export TALER_MERCHANT_DB_NAME
+export TALER_MERCHANT_BASE_URL
 
 envsubst < /etc/taler-merchant/merchant.conf.template > /etc/taler-merchant/merchant.conf
 

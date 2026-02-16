@@ -15,6 +15,7 @@ services:
     restart: unless-stopped
     environment:
       TALER_MERCHANT_PORT: ${TALER_MERCHANT_PORT:-9966}
+      TALER_MERCHANT_BASE_URL: ${TALER_MERCHANT_BASE_URL:-http://localhost:9966/}
       TALER_MERCHANT_DB_HOST: taler-merchant-db
       TALER_MERCHANT_DB_PORT: 5432
       TALER_MERCHANT_DB_USER: ${TALER_MERCHANT_DB_USER:-taler}
