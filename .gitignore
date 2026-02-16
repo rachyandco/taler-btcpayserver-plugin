@@ -1,0 +1,23 @@
+# Build output
+**/bin/
+**/obj/
+**/TestResults/
+
+# IDE / editor files
+.vs/
+.vscode/
+*.user
+*.suo
+*.swp
+*.tmp
+
+# Packaging artifacts
+*.btcpay
+*.nupkg
+*.snupkg
+
+# Local dependency checkout (nested git repo, not tracked by parent)
+
+# OS files
+.DS_Store
+Thumbs.db
