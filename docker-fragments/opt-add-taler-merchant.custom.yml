@@ -1,0 +1,29 @@
+version: "3"
+
+services:
+  taler-merchant-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${TALER_MERCHANT_DB_USER:-taler}
+      POSTGRES_PASSWORD: ${TALER_MERCHANT_DB_PASSWORD:-taler}
+      POSTGRES_DB: ${TALER_MERCHANT_DB_NAME:-taler-merchant}
+    volumes:
+      - taler_merchant_db:/var/lib/postgresql/data
+
+  taler-merchant:
+    restart: unless-stopped
+    build:
+      context: ./docker-taler-merchant
+    environment:
+      TALER_MERCHANT_PORT: ${TALER_MERCHANT_PORT:-9966}
+      TALER_MERCHANT_DB_HOST: taler-merchant-db
+      TALER_MERCHANT_DB_PORT: 5432
+      TALER_MERCHANT_DB_USER: ${TALER_MERCHANT_DB_USER:-taler}
+      TALER_MERCHANT_DB_PASSWORD: ${TALER_MERCHANT_DB_PASSWORD:-taler}
+      TALER_MERCHANT_DB_NAME: ${TALER_MERCHANT_DB_NAME:-taler-merchant}
+    depends_on:
+      - taler-merchant-db
+
+volumes:
+  taler_merchant_db:

@@ -1,0 +1,54 @@
+@inject DisplayFormatter DisplayFormatter
+@using System.Globalization
+@using BTCPayServer.Payments
+@using BTCPayServer.Services.Invoices
+@using BTCPayServer.Plugins.Taler.Services.Payments
+@using BTCPayServer.Services
+@model BTCPayServer.Models.InvoicingModels.InvoiceDetailsModel
+@inject PaymentMethodHandlerDictionary handlers
+
+@{
+    var payments = Model.Payments.Select(payment =>
+    {
+        if (!handlers.TryGetValue(payment.PaymentMethodId, out var h) || h is not TalerPaymentMethodHandler handler)
+            return null;
+        var data = handler.ParsePaymentDetails(payment.Details);
+        return new
+        {
+            data.OrderId,
+            data.AssetCode,
+            data.Amount,
+            data.TalerPayUri
+        };
+    }).Where(c => c != null).ToList();
+}
+
+@if (payments.Any())
+{
+    <section>
+        <h5>Taler Payments</h5>
+        <table class="table table-hover">
+            <thead>
+            <tr>
+                <th>Asset</th>
+                <th>Order</th>
+                <th>Pay URI</th>
+                <th class="text-end">Paid</th>
+            </tr>
+            </thead>
+            <tbody>
+            @foreach (var payment in payments)
+            {
+                <tr>
+                    <td>@payment!.AssetCode</td>
+                    <td>@payment.OrderId</td>
+                    <td>@payment.TalerPayUri</td>
+                    <td class="payment-value text-end text-nowrap">
+                        <span data-sensitive class="text-success">@DisplayFormatter.Currency(payment.Amount.ToString(CultureInfo.InvariantCulture), payment.AssetCode)</span>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </section>
+}

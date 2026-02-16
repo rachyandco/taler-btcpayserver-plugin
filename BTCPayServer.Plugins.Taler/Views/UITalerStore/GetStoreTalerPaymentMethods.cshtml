@@ -1,0 +1,35 @@
+@model BTCPayServer.Plugins.Taler.Controllers.ViewModels.ViewTalerStoreOptionsViewModel
+@{
+    ViewData["Title"] = "Taler";
+    var storeId = ViewContext.RouteData.Values["storeId"]?.ToString() ?? Context.GetStoreData()?.Id;
+}
+
+<h2 class="mb-4">Taler assets</h2>
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Asset</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    @foreach (var item in Model.Items)
+    {
+        <tr>
+            <td>@item.DisplayName</td>
+            <td>
+                <span class="me-2 btcpay-status btcpay-status--@(item.Enabled ? "enabled" : "pending")"></span>
+                @(item.Enabled ? "Enabled" : "Disabled")
+            </td>
+            <td class="text-end">
+                <a class="btn btn-link"
+                   asp-action="GetStoreTalerPaymentMethod"
+                   asp-route-storeId="@storeId"
+                   asp-route-paymentMethodId="@item.PaymentMethodId">Configure</a>
+            </td>
+        </tr>
+    }
+    </tbody>
+</table>

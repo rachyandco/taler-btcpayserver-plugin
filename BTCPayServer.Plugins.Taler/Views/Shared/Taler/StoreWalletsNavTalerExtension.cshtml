@@ -1,0 +1,36 @@
+@using BTCPayServer
+@using BTCPayServer.Abstractions.Contracts
+@using BTCPayServer.Data
+@using BTCPayServer.Payments
+@using BTCPayServer.Plugins.Taler.Configuration
+@using BTCPayServer.Plugins.Taler.Controllers
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@inject SignInManager<ApplicationUser> SignInManager;
+@inject TalerPluginConfiguration TalerPluginConfiguration;
+@inject IScopeProvider ScopeProvider
+@inject UITalerStoreController UITalerStore;
+@{
+    var storeId = ScopeProvider.GetCurrentStoreId()
+                  ?? ViewContext.RouteData.Values["storeId"]?.ToString()
+                  ?? Context.GetStoreData()?.Id;
+}
+@if (SignInManager.IsSignedIn(User) && TalerPluginConfiguration.AssetConfigurationItems.Any())
+{
+    var store = Context.GetStoreData();
+    var result = UITalerStore.GetVM(store);
+
+    foreach (var item in result.Items)
+    {
+        var isActive = !string.IsNullOrEmpty(storeId) && ViewContext.RouteData.Values.TryGetValue("Controller", out var controller) && controller is not null &&
+                       nameof(UITalerStoreController).StartsWith(controller.ToString() ?? string.Empty, StringComparison.InvariantCultureIgnoreCase) &&
+                       ViewContext.RouteData.Values.TryGetValue("paymentMethodId", out var paymentMethodId) && paymentMethodId is not null && new PaymentMethodId((string)paymentMethodId) == item.PaymentMethodId;
+        var targetUrl = $"/stores/{storeId}/taler/{Uri.EscapeDataString(item.PaymentMethodId.ToString())}";
+        <li class="nav-item">
+            <a class="nav-link @(isActive ? "active" : "")" href="@targetUrl">
+                <span class="me-2 btcpay-status btcpay-status--@(item.Enabled ? "enabled" : "pending")"></span>
+                <span>@item.DisplayName</span>
+            </a>
+        </li>
+    }
+}

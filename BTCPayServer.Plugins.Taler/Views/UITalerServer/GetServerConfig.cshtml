@@ -1,0 +1,220 @@
+@model BTCPayServer.Plugins.Taler.Controllers.ViewModels.TalerServerConfigViewModel
+@{
+    ViewData["Title"] = "Taler";
+}
+
+<h2 class="mb-4">Taler settings</h2>
+
+<form method="post" asp-action="GetServerConfig">
+    <div class="form-group mb-3">
+        <label asp-for="MerchantBaseUrl" class="form-label"></label>
+        <input asp-for="MerchantBaseUrl" class="form-control" placeholder="https://merchant.example.com/" />
+        <div class="form-text">Base URL of your Taler merchant backend.</div>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="MerchantPublicBaseUrl" class="form-label"></label>
+        <input asp-for="MerchantPublicBaseUrl" class="form-control" placeholder="https://pay.example.com/taler/" />
+        <div class="form-text">Optional public URL used in `taler+` payment links. Set this when your merchant backend is behind reverse proxy/path rewriting.</div>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="MerchantInstanceId" class="form-label"></label>
+        <input asp-for="MerchantInstanceId" class="form-control" placeholder="default" />
+        <div class="form-text">Leave empty to use the default instance.</div>
+    </div>
+    <div class="form-group mb-3">
+        <label asp-for="InstancePassword" class="form-label"></label>
+        <div class="input-group">
+            <input asp-for="InstancePassword"
+                   class="form-control"
+                   type="password"
+                   autocomplete="off"
+                   value="@Model.InstancePassword" />
+            <button class="btn btn-outline-secondary px-3 only-for-js" type="button"
+                    title="Show or hide value"
+                    aria-label="Show or hide instance password"
+                    data-toggle-password="#InstancePassword">
+                <span aria-hidden="true">&#128065;</span>
+            </button>
+        </div>
+        <div class="form-text">Password used to initialize and manage the instance.</div>
+    </div>
+    <div class="form-group mb-4">
+        <label asp-for="ApiToken" class="form-label"></label>
+        <div class="input-group">
+            <input asp-for="ApiToken"
+                   class="form-control"
+                   type="password"
+                   autocomplete="off"
+                   value="@Model.ApiToken" />
+            <button class="btn btn-outline-secondary px-3 only-for-js" type="button"
+                    title="Show or hide value"
+                    aria-label="Show or hide API token"
+                    data-toggle-password="#ApiToken">
+                <span aria-hidden="true">&#128065;</span>
+            </button>
+        </div>
+        <div class="form-text">Provide the merchant API token (secret-token:...)
+            for private APIs. For full self-provisioning from this UI, the token must include account-management permissions.</div>
+    </div>
+
+    <div class="d-flex gap-2 mb-4">
+        <button type="submit" class="btn btn-outline-primary" formaction="@Url.Action("InitInstance")" formmethod="post">Initialize instance</button>
+        <button type="submit" class="btn btn-outline-secondary" formaction="@Url.Action("GenerateToken")" formmethod="post">Generate API token</button>
+        <button type="submit" class="btn btn-outline-secondary" formaction="@Url.Action("RefreshBankAccounts")" formmethod="post">Check bank accounts</button>
+    </div>
+
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <h4 class="mb-0">Assets</h4>
+        <button type="submit" class="btn btn-outline-secondary" formaction="@Url.Action("RefreshAssets")" formmethod="post">Fetch assets</button>
+    </div>
+
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Divisibility</th>
+                <th>Symbol</th>
+                <th>Enabled</th>
+                <th>Source</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @if (Model.Assets.Any())
+        {
+            for (var i = 0; i < Model.Assets.Count; i++)
+            {
+                <tr>
+                    <td>
+                        @Model.Assets[i].AssetCode
+                        <input type="hidden" asp-for="Assets[i].AssetCode" />
+                    </td>
+                    <td>
+                        <input class="form-control" asp-for="Assets[i].DisplayName" />
+                    </td>
+                    <td>
+                        <input class="form-control" asp-for="Assets[i].Divisibility" />
+                    </td>
+                    <td>
+                        <input class="form-control" asp-for="Assets[i].Symbol" />
+                    </td>
+                    <td>
+                        <input class="form-check-input" asp-for="Assets[i].Enabled" />
+                    </td>
+                    <td>
+                        @(Model.Assets[i].IsManual ? "Manual" : "Discovered")
+                        <input type="hidden" asp-for="Assets[i].IsManual" />
+                    </td>
+                    <td>
+                        @if (Model.Assets[i].IsManual)
+                        {
+                            <button type="submit" class="btn btn-link p-0" formaction="@Url.Action("DeleteAsset", new { assetCode = Model.Assets[i].AssetCode })" formmethod="post">Remove</button>
+                        }
+                    </td>
+                </tr>
+            }
+        }
+        else
+        {
+            <tr>
+                <td colspan="7" class="text-muted">No assets configured yet.</td>
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    <button type="submit" class="btn btn-primary">Save</button>
+</form>
+
+<hr class="my-4" />
+
+<div class="d-flex align-items-center justify-content-between mb-2">
+    <h4 class="mb-0">Bank accounts</h4>
+</div>
+@if (!string.IsNullOrWhiteSpace(Model.BankAccountsError))
+{
+    <div class="alert alert-warning">
+        Could not load bank accounts: @Model.BankAccountsError
+    </div>
+}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Payto URI</th>
+            <th>H_wire</th>
+            <th>Active</th>
+        </tr>
+    </thead>
+    <tbody>
+    @if (Model.BankAccounts.Any())
+    {
+        foreach (var account in Model.BankAccounts)
+        {
+            <tr>
+                <td><code>@account.PaytoUri</code></td>
+                <td><code>@account.HWire</code></td>
+                <td>
+                    <span class="me-2 btcpay-status btcpay-status--@(account.Active ? "enabled" : "pending")"></span>
+                    @(account.Active ? "Yes" : "No")
+                </td>
+            </tr>
+        }
+    }
+    else
+    {
+        <tr>
+            <td colspan="3" class="text-muted">No bank accounts found for this instance.</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+<h4>Add bank account</h4>
+<form method="post" asp-action="AddBankAccount">
+    <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
+    <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
+    <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
+    <div class="row g-3">
+        <div class="col-md-8">
+            <label class="form-label" for="NewPaytoUri">Payto URI</label>
+            <input class="form-control" id="NewPaytoUri" name="PaytoUri" placeholder="payto://..." />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="NewCreditFacadeUrl">Credit facade URL (optional)</label>
+            <input class="form-control" id="NewCreditFacadeUrl" name="CreditFacadeUrl" placeholder="https://..." />
+        </div>
+    </div>
+    <button type="submit" class="btn btn-outline-primary mt-3">Add bank account</button>
+</form>
+
+<hr class="my-4" />
+
+<h4>Add manual asset</h4>
+<form method="post" asp-action="AddManualAsset">
+    <div class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label" for="ManualAssetCode">Code</label>
+            <input class="form-control" id="ManualAssetCode" name="AssetCode" placeholder="KUDOS" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="ManualDisplayName">Display name</label>
+            <input class="form-control" id="ManualDisplayName" name="DisplayName" placeholder="Taler KUDOS" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="ManualDivisibility">Divisibility</label>
+            <input class="form-control" id="ManualDivisibility" name="Divisibility" type="number" value="2" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="ManualSymbol">Symbol</label>
+            <input class="form-control" id="ManualSymbol" name="Symbol" placeholder="K" />
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="Enabled" id="ManualEnabled" checked />
+                <label class="form-check-label" for="ManualEnabled">Enabled</label>
+            </div>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-outline-primary mt-3">Add asset</button>
+</form>

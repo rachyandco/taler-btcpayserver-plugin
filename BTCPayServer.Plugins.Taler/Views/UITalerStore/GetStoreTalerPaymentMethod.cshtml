@@ -1,0 +1,15 @@
+@model BTCPayServer.Plugins.Taler.Controllers.ViewModels.EditTalerPaymentMethodViewModel
+@{
+    ViewData["Title"] = "Taler";
+}
+
+<h2 class="mb-4">@Model.DisplayName</h2>
+
+<form method="post">
+    <div class="form-check mb-3">
+        <input class="form-check-input" asp-for="Enabled" />
+        <label class="form-check-label" asp-for="Enabled">Enable this asset for the store</label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save</button>
+</form>

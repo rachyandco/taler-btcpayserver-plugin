@@ -1,0 +1,130 @@
+# BTCPayServer GNU Taler Plugin
+
+BTCPay plugin to accept GNU Taler payments with multi-asset support (`CHF`, `KUDOS`, and manual assets).
+
+## Warning
+This is experimental software.
+GNU Taler is in active development and upstream protocol/API behavior may change.
+This plugin can break between BTCPay or Taler upgrades and should be deployed with caution in production.
+
+## Quick production checklist
+1. Copy plugin into BTCPay and install the generated `.btcpay` package.
+2. Deploy `taler-merchant` + `taler-merchant-db` using the provided BTCPay docker fragment.
+3. Ensure merchant template contains `BASE_URL = "${TALER_MERCHANT_BASE_URL}"`.
+4. Set `/root/BTCPayServer/.env`: `TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/`.
+5. Ensure fragment passes `TALER_MERCHANT_BASE_URL` into `taler-merchant` container environment.
+6. Configure nginx route: `/taler-merchant/ -> http://taler-merchant:9966/`.
+7. Block public access to `/taler-merchant/*private*` and `/taler-merchant/management*`.
+8. In `Server settings -> Taler`: set internal `Merchant base URL` and public `Merchant public base URL`.
+9. Initialize instance, generate API token, add bank account, fetch/enable assets, then restart BTCPay.
+10. Create a fresh invoice and verify QR/Pay link uses valid `taler://pay/...` URI and payment is detected.
+
+## Features
+- Server-level Taler settings UI
+- Store-level enable/disable per Taler asset
+- Auto-discovery of assets from merchant `/config`
+- Manual asset add/remove
+- Merchant instance self-provisioning from UI (init instance, token generation, bank account checks/add)
+- Invoice checkout integration with Taler QR and wallet link
+- Background payment listener to settle BTCPay invoices when merchant reports paid orders
+
+## Repository layout
+- Plugin code: `BTCPayServer.Plugins.Taler/`
+- Standalone merchant docker: `docker-compose.taler.yml`
+- Merchant image/context for BTCPay docker: `docker/taler-merchant/`
+- BTCPay docker fragment: `docker-fragments/opt-add-taler-merchant.custom.yml`
+
+## Build plugin
+Prereqs:
+- .NET 8 SDK
+- BTCPay source available at `submodules/btcpayserver`
+
+Build:
+```bash
+dotnet publish BTCPayServer.Plugins.Taler/BTCPayServer.Plugins.Taler.csproj -c Release -o /tmp/taler-plugin-publish --no-restore -m:1
+```
+
+The output directory contains the plugin payload used to create a `.btcpay` package for upload.
+
+## BTCPay server settings
+Go to `Server settings -> Taler` and configure:
+- `Merchant base URL`: internal URL reachable by BTCPay container, typically `http://taler-merchant:9966/`
+- `Merchant public base URL`: public URL used in checkout links, typically `https://<your-host>/taler-merchant/`
+- `Merchant instance ID`: usually `default`
+- `Instance password`
+- `Merchant API token`
+
+Then:
+- `Initialize instance`
+- `Generate API token` (uses `scope: all`)
+- `Check bank accounts`
+- `Fetch assets`
+- Save and restart BTCPay when asset set changes
+
+## Merchant backend deployment with btcpayserver-docker
+Copy files into your btcpayserver-docker checkout:
+- `docker-fragments/opt-add-taler-merchant.custom.yml` -> `docker-compose-generator/docker-fragments/opt-add-taler-merchant.custom.yml`
+- `docker/taler-merchant/` -> `docker-taler-merchant/`
+
+Enable fragment in `/root/BTCPayServer/.env`:
+```bash
+BTCPAYGEN_ADDITIONAL_FRAGMENTS=...;opt-add-taler-merchant.custom
+```
+
+Set merchant base URL env (used by merchant config template):
+```bash
+TALER_MERCHANT_BASE_URL=https://pay.example.com/taler-merchant/
+```
+
+Important:
+- The fragment must pass `TALER_MERCHANT_BASE_URL` into `taler-merchant` service environment.
+- `docker-taler-merchant/merchant.conf` should include:
+```ini
+BASE_URL = "${TALER_MERCHANT_BASE_URL}"
+```
+
+Regenerate/redeploy:
+```bash
+. ./btcpay-setup.sh -i
+docker compose -f Generated/docker-compose.generated.yml up -d --build --force-recreate taler-merchant taler-merchant-db
+```
+
+Verify loaded value:
+```bash
+docker exec -it generated-taler-merchant-1 taler-merchant-config -s merchant -o BASE_URL -f
+```
+
+## Nginx reverse proxy (public merchant path)
+Expose merchant public endpoints through BTCPay nginx at `/taler-merchant/` over HTTPS.
+
+Minimal vhost snippet:
+```nginx
+location /taler-merchant/ {
+    proxy_pass http://taler-merchant:9966/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+Recommended hardening:
+```nginx
+location ~ ^/taler-merchant/(private|management|instances/[^/]+/private)/ {
+    return 403;
+}
+```
+
+## API/token notes
+- Merchant private API calls use `Authorization: Bearer secret-token:...`
+- Token scope must allow required operations. `all` is used for provisioning flows.
+- If you see `401` on private endpoints, regenerate token and save it in BTCPay.
+
+## Common issues
+- `instance not found` (`code: 2000`): initialize instance first.
+- `no active bank account` (`code: 2500`): add bank account to the instance.
+- `legal limits` (`code: 2513`): exchange/KYC constraint, not a BTCPay plugin bug.
+- Asset list empty until restart: restart BTCPay after changing enabled assets.
+
+## License
+GPLv3. See `LICENSE`.

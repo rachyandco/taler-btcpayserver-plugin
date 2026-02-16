@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Configurations>Release;Altcoins-Debug</Configurations>
+    <Platforms>AnyCPU</Platforms>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Product>GNU Taler</Product>
+    <Description>Accept GNU Taler payments with BTCPayServer.</Description>
+    <Version>0.0.0.36</Version>
+    <AssemblyVersion>0.0.0.36</AssemblyVersion>
+    <FileVersion>0.0.0.36</FileVersion>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Altcoins-Debug' ">
+    <DebugSymbols Condition=" '$(DebugSymbols)' == '' ">true</DebugSymbols>
+    <Optimize Condition=" '$(Optimize)' == '' ">false</Optimize>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <ProjectReference>
+      <Properties>StaticWebAssetsEnabled=false</Properties>
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native;build;buildTransitive;contentFiles</ExcludeAssets>
+    </ProjectReference>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <Folder Include="Views\Shared\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="Views\Shared\Taler\ServerNavTalerExtension.cshtml" />
+    <AdditionalFiles Include="Views\Shared\Taler\StoreWalletsNavTalerExtension.cshtml" />
+    <AdditionalFiles Include="Views\Shared\Taler\ViewTalerPaymentData.cshtml" />
+    <AdditionalFiles Include="Views\Shared\Taler\CheckoutPaymentMethod.cshtml" />
+    <AdditionalFiles Include="Views\UITalerStore\GetStoreTalerPaymentMethods.cshtml" />
+    <AdditionalFiles Include="Views\UITalerStore\GetStoreTalerPaymentMethod.cshtml" />
+    <AdditionalFiles Include="Views\UITalerServer\GetServerConfig.cshtml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\submodules\btcpayserver\BTCPayServer\BTCPayServer.csproj" />
+  </ItemGroup>
+
+</Project>
