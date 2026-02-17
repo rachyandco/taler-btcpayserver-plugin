@@ -1,3 +1,6 @@
+// Persisted server-wide settings edited from "Server settings -> Taler".
+// Inputs: admin UI values and discovered/manual assets.
+// Output: serialized configuration loaded on plugin startup.
 using System.Collections.Generic;
 
 namespace BTCPayServer.Plugins.Taler.Configuration;

@@ -1,3 +1,6 @@
+// Core BTCPay payment handler that creates and tracks Taler merchant orders.
+// Inputs: invoice prompt context, merchant credentials, and asset configuration.
+// Output: checkout prompt details and persisted payment data parsing logic.
 using System;
 using System.Globalization;
 using System.Net.Http;
@@ -20,6 +23,11 @@ public class TalerPaymentMethodHandler(
 
     public PaymentMethodId PaymentMethodId { get; } = configurationItem.GetPaymentMethodId();
 
+    /// <summary>
+    /// Sets prompt currency/divisibility before BTCPay rate processing.
+    /// Inputs: mutable payment method context.
+    /// Output: prompt configured to use the selected Taler asset.
+    /// </summary>
     public Task BeforeFetchingRates(PaymentMethodContext context)
     {
         context.Prompt.Currency = configurationItem.AssetCode;
@@ -28,6 +36,11 @@ public class TalerPaymentMethodHandler(
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Creates merchant order, fetches pay URI, and stores prompt details.
+    /// Inputs: invoice payment context and merchant/API settings.
+    /// Output: populated prompt details used by checkout and listener.
+    /// </summary>
     public async Task ConfigurePrompt(PaymentMethodContext context)
     {
         if (string.IsNullOrWhiteSpace(configurationItem.MerchantBaseUrl))
@@ -104,23 +117,43 @@ public class TalerPaymentMethodHandler(
         return ParsePaymentDetails(details);
     }
 
+    /// <summary>
+    /// Parses stored payment method configuration object.
+    /// Inputs: JSON token from BTCPay config persistence.
+    /// Output: typed <see cref="TalerPaymentMethodConfig"/> instance.
+    /// </summary>
     private static TalerPaymentMethodConfig ParsePaymentMethodConfig(JToken config)
     {
         return config.ToObject<TalerPaymentMethodConfig>(BlobSerializer.CreateSerializer().Serializer) ??
                throw new FormatException($"Invalid {nameof(TalerPaymentMethodHandler)} config");
     }
 
+    /// <summary>
+    /// Parses prompt details from invoice storage.
+    /// Inputs: serialized details JSON token.
+    /// Output: typed prompt details or null.
+    /// </summary>
     public TalerPaymentMethodDetails? ParsePaymentPromptDetails(JToken details)
     {
         return details.ToObject<TalerPaymentMethodDetails>(Serializer);
     }
 
+    /// <summary>
+    /// Parses settled payment details from payment storage.
+    /// Inputs: serialized payment details JSON token.
+    /// Output: typed <see cref="TalerPaymentData"/> payload.
+    /// </summary>
     public TalerPaymentData ParsePaymentDetails(JToken details)
     {
         return details.ToObject<TalerPaymentData>(Serializer) ??
                throw new FormatException($"Invalid {nameof(TalerPaymentMethodHandler)} payment details");
     }
 
+    /// <summary>
+    /// Rewrites merchant-provided pay URI to selected public base URL when needed.
+    /// Inputs: original merchant URI and optional public base URL override.
+    /// Output: normalized URI used by checkout.
+    /// </summary>
     private static string RewritePublicPayUri(string talerPayUri, string? publicBaseUrl)
     {
         if (string.IsNullOrWhiteSpace(publicBaseUrl))
@@ -155,6 +188,11 @@ public class TalerPaymentMethodHandler(
         return NormalizeToWalletPayUri(hasTalerPrefix ? $"{talerPrefix}{rebuilt}" : rebuilt);
     }
 
+    /// <summary>
+    /// Converts HTTP-style Taler links to wallet-native `taler://pay/...` format.
+    /// Inputs: any merchant pay URI value.
+    /// Output: wallet-compatible URI string.
+    /// </summary>
     private static string NormalizeToWalletPayUri(string uriValue)
     {
         const string talerPrefix = "taler+";

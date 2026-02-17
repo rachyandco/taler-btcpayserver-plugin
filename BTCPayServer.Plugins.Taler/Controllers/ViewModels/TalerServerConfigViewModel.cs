@@ -1,3 +1,6 @@
+// View models used by the server-level Taler settings page and related forms.
+// Inputs: values from settings storage and form posts.
+// Output: strongly typed models rendered in Razor views and validated on submit.
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 

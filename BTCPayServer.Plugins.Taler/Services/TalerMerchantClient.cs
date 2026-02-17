@@ -1,3 +1,6 @@
+// HTTP client wrapper around GNU Taler merchant APIs used by this plugin.
+// Inputs: merchant base URL, instance credentials, and order/account identifiers.
+// Output: typed responses for assets, bank accounts, orders, and provisioning actions.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -20,6 +23,11 @@ public record TalerTokenResponse(string AccessToken);
 
 public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantClient> logger)
 {
+    /// <summary>
+    /// Reads merchant wire accounts for one instance.
+    /// Inputs: base URL, instance ID, API token, cancellation token.
+    /// Output: list of payto accounts with active status and h_wire.
+    /// </summary>
     public async Task<IReadOnlyList<TalerBankAccount>> GetBankAccountsAsync(string baseUrl, string instanceId, string apiToken, CancellationToken cancellationToken)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, BuildInstancePrivateUri(baseUrl, instanceId, "accounts"));
@@ -47,6 +55,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return result;
     }
 
+    /// <summary>
+    /// Adds a new bank account to merchant instance configuration.
+    /// Inputs: backend coordinates, API token, payto URI, optional facade URL.
+    /// Output: none; throws on HTTP/API errors.
+    /// </summary>
     public async Task AddBankAccountAsync(string baseUrl, string instanceId, string apiToken, string paytoUri, string? creditFacadeUrl, CancellationToken cancellationToken)
     {
         var payload = new
@@ -65,6 +78,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         await EnsureSuccessStatusCode(response, "add bank account");
     }
 
+    /// <summary>
+    /// Reads merchant global config to detect self-provisioning support.
+    /// Inputs: base URL and cancellation token.
+    /// Output: <see cref="TalerConfig"/> with self-provisioning flag.
+    /// </summary>
     public async Task<TalerConfig> GetConfigAsync(string baseUrl, CancellationToken cancellationToken)
     {
         var uri = BuildUri(baseUrl, "config");
@@ -78,6 +96,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return new TalerConfig(selfProvisioning);
     }
 
+    /// <summary>
+    /// Discovers merchant currencies from `/config`.
+    /// Inputs: base URL and cancellation token.
+    /// Output: normalized list of asset code/name/divisibility/symbol.
+    /// </summary>
     public async Task<IReadOnlyList<TalerDiscoveredAsset>> GetCurrenciesAsync(string baseUrl, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
@@ -111,6 +134,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return result;
     }
 
+    /// <summary>
+    /// Creates merchant instance through management/self-provisioning API.
+    /// Inputs: base URL, instance ID, password, cancellation token.
+    /// Output: none; returns silently when instance already exists.
+    /// </summary>
     public async Task CreateInstanceAsync(string baseUrl, string instanceId, string password, CancellationToken cancellationToken)
     {
         var payloadJson = JsonSerializer.Serialize(new
@@ -158,6 +186,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         await EnsureSuccessStatusCode(responseToUse, "create instance");
     }
 
+    /// <summary>
+    /// Creates API token for one merchant instance.
+    /// Inputs: base URL, instance ID/password, token scope, cancellation token.
+    /// Output: access token value returned by merchant backend.
+    /// </summary>
     public async Task<TalerTokenResponse> CreateTokenAsync(string baseUrl, string instanceId, string password, string scope, CancellationToken cancellationToken)
     {
         var payload = new
@@ -185,6 +218,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return new TalerTokenResponse(token!);
     }
 
+    /// <summary>
+    /// Creates merchant order for checkout payment.
+    /// Inputs: backend URL, instance, API token, order metadata and amount.
+    /// Output: created order ID string.
+    /// </summary>
     public async Task<string> CreateOrderAsync(string baseUrl, string instanceId, string apiToken, string orderId, string summary, string amount, CancellationToken cancellationToken)
     {
         var payloadJson = JsonSerializer.Serialize(new
@@ -230,6 +268,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return orderId;
     }
 
+    /// <summary>
+    /// Reads order status including payment state and pay URI.
+    /// Inputs: backend URL, instance, API token, order ID.
+    /// Output: <see cref="TalerOrderStatus"/> with paid flag and amount details.
+    /// </summary>
     public async Task<TalerOrderStatus> GetOrderStatusAsync(string baseUrl, string instanceId, string apiToken, string orderId, CancellationToken cancellationToken)
     {
         var primaryUri = BuildInstancePrivateUri(baseUrl, instanceId, $"orders/{orderId}");
@@ -290,12 +333,22 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return new TalerOrderStatus(orderId, payUri, paid, amount, currency);
     }
 
+    /// <summary>
+    /// Builds absolute merchant URI from base + relative path.
+    /// Inputs: base URL and relative endpoint string.
+    /// Output: normalized absolute <see cref="Uri"/>.
+    /// </summary>
     private static Uri BuildUri(string baseUrl, string relative)
     {
         var trimmed = baseUrl.TrimEnd('/') + "/";
         return new Uri(new Uri(trimmed), relative);
     }
 
+    /// <summary>
+    /// Builds preferred instance private API path.
+    /// Inputs: base URL, instance ID, private endpoint suffix.
+    /// Output: instance-private endpoint URI.
+    /// </summary>
     private static Uri BuildInstancePrivateUri(string baseUrl, string instanceId, string relativePrivatePath)
     {
         if (IsInstanceBaseUrl(baseUrl))
@@ -304,6 +357,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return BuildUri(baseUrl, $"instances/{instanceId}/private/{relativePrivatePath}");
     }
 
+    /// <summary>
+    /// Builds fallback private API path for alternate merchant URL layouts.
+    /// Inputs: base URL, instance ID, private endpoint suffix.
+    /// Output: alternate URI or null when not applicable.
+    /// </summary>
     private static Uri? BuildAlternativeInstancePrivateUri(string baseUrl, string instanceId, string relativePrivatePath)
     {
         if (IsInstanceBaseUrl(baseUrl))
@@ -312,6 +370,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return BuildUri(baseUrl, $"private/{relativePrivatePath}");
     }
 
+    /// <summary>
+    /// Detects whether base URL already points to a specific instance path.
+    /// Inputs: base URL string.
+    /// Output: true when URL path ends with `/instances/{id}`.
+    /// </summary>
     private static bool IsInstanceBaseUrl(string baseUrl)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri))
@@ -324,6 +387,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                segments[^2].Equals("instances", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Strips instance path from base URL and returns server root.
+    /// Inputs: absolute base URL.
+    /// Output: root URL with scheme/host/port and trailing slash.
+    /// </summary>
     private static string GetServerRootBaseUrl(string baseUrl)
     {
         var uri = new Uri(baseUrl);
@@ -331,6 +399,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return $"{uri.Scheme}://{uri.Host}{port}/";
     }
 
+    /// <summary>
+    /// Builds authenticated JSON HTTP request.
+    /// Inputs: method, URI, serialized payload, and API token.
+    /// Output: ready-to-send <see cref="HttpRequestMessage"/>.
+    /// </summary>
     private static HttpRequestMessage BuildJsonRequest(HttpMethod method, Uri uri, string payloadJson, string apiToken)
     {
         var request = new HttpRequestMessage(method, uri)
@@ -341,6 +414,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         return request;
     }
 
+    /// <summary>
+    /// Throws enriched exception when HTTP response is not successful.
+    /// Inputs: response object and operation label.
+    /// Output: none; method returns only on success status codes.
+    /// </summary>
     private static async Task EnsureSuccessStatusCode(HttpResponseMessage response, string operation)
     {
         if (response.IsSuccessStatusCode)
@@ -352,6 +430,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             $"Taler merchant {operation} failed with {(int)response.StatusCode} ({response.StatusCode}) at {response.RequestMessage?.RequestUri}. Body: {bodySnippet}");
     }
 
+    /// <summary>
+    /// Applies bearer authorization header for merchant private APIs.
+    /// Inputs: request object and token string.
+    /// Output: mutated request headers.
+    /// </summary>
     private static void AddAuthorization(HttpRequestMessage request, string apiToken)
     {
         if (string.IsNullOrWhiteSpace(apiToken))

@@ -1,3 +1,6 @@
+// Store-level controller for enabling/disabling Taler assets per BTCPay store.
+// Inputs: store data, configured plugin assets, and posted toggle values.
+// Output: store wallet settings pages and persisted payment method config.
 using System.Linq;
 using System.Threading.Tasks;
 using BTCPayServer.Abstractions.Constants;
@@ -25,9 +28,19 @@ public class UITalerStoreController(
     PaymentMethodHandlerDictionary handlers,
     TalerPluginConfiguration pluginConfiguration) : Controller
 {
+    /// <summary>
+    /// Returns current store entity from request context.
+    /// Inputs: active HTTP context store binding.
+    /// Output: <see cref="StoreData"/> for authorization and config reads.
+    /// </summary>
     private StoreData StoreData => HttpContext.GetStoreData();
 
     [HttpGet]
+    /// <summary>
+    /// Displays all available Taler assets for the selected store.
+    /// Inputs: store context and plugin asset registry.
+    /// Output: list view model rendered in store wallets UI.
+    /// </summary>
     public IActionResult GetStoreTalerPaymentMethods()
     {
         var vm = GetVM(StoreData);
@@ -35,6 +48,11 @@ public class UITalerStoreController(
     }
 
     [NonAction]
+    /// <summary>
+    /// Builds store-facing Taler options from configured plugin assets.
+    /// Inputs: store object and payment method handlers.
+    /// Output: asset list with enabled/disabled flags for each configured Taler method.
+    /// </summary>
     public ViewTalerStoreOptionsViewModel GetVM(StoreData storeData)
     {
         var excludeFilters = storeData.GetStoreBlob().GetExcludedPaymentMethods();
@@ -56,6 +74,11 @@ public class UITalerStoreController(
     }
 
     [HttpGet("{paymentMethodId}")]
+    /// <summary>
+    /// Displays one store Taler payment method configuration form.
+    /// Inputs: payment method ID route value and store config.
+    /// Output: edit view model or 404 when asset is unknown.
+    /// </summary>
     public IActionResult GetStoreTalerPaymentMethod(PaymentMethodId paymentMethodId)
     {
         if (!pluginConfiguration.AssetConfigurationItems.TryGetValue(paymentMethodId, out var asset))
@@ -73,6 +96,11 @@ public class UITalerStoreController(
 
     [HttpPost("{paymentMethodId}")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Saves enabled flag for one Taler method in the current store.
+    /// Inputs: posted form model and payment method ID.
+    /// Output: updated store config and redirect to edit page.
+    /// </summary>
     public async Task<IActionResult> GetStoreTalerPaymentMethod(EditTalerPaymentMethodViewModel viewModel, PaymentMethodId paymentMethodId)
     {
         if (!pluginConfiguration.AssetConfigurationItems.TryGetValue(paymentMethodId, out var asset))

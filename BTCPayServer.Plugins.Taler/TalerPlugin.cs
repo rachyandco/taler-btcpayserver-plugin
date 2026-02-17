@@ -1,3 +1,6 @@
+// Plugin entry point that registers services, payment handlers, and UI extensions.
+// Inputs: dependency injection service collection and persisted server settings.
+// Output: fully wired Taler payment methods available to BTCPay.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -25,12 +28,22 @@ public class TalerPlugin : BaseBTCPayServerPlugin
         new IBTCPayServerPlugin.PluginDependency { Identifier = nameof(BTCPayServer), Condition = ">=2.0.0" }
     ];
 
+    /// <summary>
+    /// Registers plugin services into BTCPay dependency injection container.
+    /// Inputs: host service collection.
+    /// Output: mutated service registrations.
+    /// </summary>
     public override void Execute(IServiceCollection serviceCollection)
     {
         RegisterServices(serviceCollection);
         base.Execute(serviceCollection);
     }
 
+    /// <summary>
+    /// Builds runtime asset config and registers all Taler payment integrations.
+    /// Inputs: service collection + persisted server settings.
+    /// Output: registered handlers, extensions, currencies, and hosted listener.
+    /// </summary>
     private static void RegisterServices(IServiceCollection services)
     {
         var settingsRepository = services.BuildServiceProvider().GetService<ISettingsRepository>() ??

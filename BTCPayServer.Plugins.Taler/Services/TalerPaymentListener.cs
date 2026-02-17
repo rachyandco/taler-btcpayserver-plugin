@@ -1,3 +1,6 @@
+// Background worker polling Taler merchant orders to settle BTCPay invoices.
+// Inputs: monitored invoices, plugin asset config, and merchant status API.
+// Output: persisted BTCPay payments + invoice update events when paid.
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,6 +36,11 @@ public class TalerPaymentListener(
     private CancellationTokenSource? _cts;
     private Task? _loop;
 
+    /// <summary>
+    /// Starts background polling loop when at least one Taler asset is enabled.
+    /// Inputs: host cancellation token.
+    /// Output: running loop task or no-op.
+    /// </summary>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         if (talerPluginConfiguration.AssetConfigurationItems.Count == 0)
@@ -43,12 +51,22 @@ public class TalerPaymentListener(
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Requests graceful shutdown of polling loop.
+    /// Inputs: host cancellation token.
+    /// Output: loop task completion.
+    /// </summary>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _cts?.Cancel();
         return _loop ?? Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Main loop iterating all configured assets on a fixed interval.
+    /// Inputs: cancellation token.
+    /// Output: periodic merchant checks until cancellation.
+    /// </summary>
     private async Task Loop(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
@@ -74,6 +92,11 @@ public class TalerPaymentListener(
         }
     }
 
+    /// <summary>
+    /// Checks unpaid monitored invoices for one asset and records settled payments.
+    /// Inputs: asset config and cancellation token.
+    /// Output: new BTCPay payments and invoice update events.
+    /// </summary>
     private async Task CheckPaymentsForAsset(TalerAssetConfigurationItem asset, CancellationToken token)
     {
         var pmi = asset.GetPaymentMethodId();

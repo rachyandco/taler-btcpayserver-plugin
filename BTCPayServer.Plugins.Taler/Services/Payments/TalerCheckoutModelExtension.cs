@@ -1,3 +1,6 @@
+// Checkout extension that maps Taler payment details into BTCPay checkout model fields.
+// Inputs: payment prompt data produced by Taler handler.
+// Output: QR/link values (`InvoiceBitcoinUrl*`) shown on checkout page.
 using System.Collections.Generic;
 using System.Linq;
 using BTCPayServer.Payments;
@@ -16,6 +19,11 @@ public class TalerCheckoutModelExtension(
     public string Image => configurationItem.CryptoImagePath ?? string.Empty;
     public string Badge => "";
 
+    /// <summary>
+    /// Populates checkout model URL/QR fields for Taler payment prompts.
+    /// Inputs: checkout context with Taler prompt details.
+    /// Output: updated model consumed by standard BTCPay checkout component.
+    /// </summary>
     public void ModifyCheckoutModel(CheckoutModelContext context)
     {
         if (context is not { Handler: TalerPaymentMethodHandler })

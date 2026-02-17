@@ -1,3 +1,6 @@
+// View models used by store wallet pages for Taler payment method toggles.
+// Inputs: store payment configs and enabled plugin assets.
+// Output: UI-friendly structures for list and edit screens.
 using System.Collections.Generic;
 using BTCPayServer.Payments;
 

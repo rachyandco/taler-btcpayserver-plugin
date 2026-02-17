@@ -1,3 +1,6 @@
+// Server admin controller for global Taler configuration and provisioning actions.
+// Inputs: posted form values, merchant API responses, persisted settings.
+// Output: Razor views and status messages for server-level Taler operations.
 using System;
 using System.Linq;
 using System.Net.Http;
@@ -26,6 +29,11 @@ public class UITalerServerController(
     private const string SecretMask = "***";
 
     [HttpGet]
+    /// <summary>
+    /// Loads current Taler server settings and bank account status for the admin page.
+    /// Inputs: persisted settings and optional merchant connectivity.
+    /// Output: settings view model rendered in the Taler server UI.
+    /// </summary>
     public async Task<IActionResult> GetServerConfig()
     {
         var settings = await GetSettings();
@@ -40,6 +48,11 @@ public class UITalerServerController(
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Saves server-level Taler settings entered in the admin form.
+    /// Inputs: posted configuration values and existing secrets for mask handling.
+    /// Output: redirect to settings page with success/error status message.
+    /// </summary>
     public async Task<IActionResult> GetServerConfig(TalerServerConfigViewModel viewModel)
     {
         if (!ModelState.IsValid)
@@ -66,6 +79,11 @@ public class UITalerServerController(
 
     [HttpPost("refresh-assets")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Queries merchant /config and merges discovered currencies into stored assets.
+    /// Inputs: merchant base URL from form/settings.
+    /// Output: updated server settings and redirect with operation result.
+    /// </summary>
     public async Task<IActionResult> RefreshAssets(TalerServerConfigViewModel? form)
     {
         var settings = await GetSettings();
@@ -137,6 +155,11 @@ public class UITalerServerController(
 
     [HttpPost("init-instance")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Creates or validates a merchant instance using self-provisioning endpoints.
+    /// Inputs: base URL, instance ID, and instance password.
+    /// Output: persisted instance settings and status message.
+    /// </summary>
     public async Task<IActionResult> InitInstance(TalerServerConfigViewModel? form)
     {
         var settings = await GetSettings();
@@ -202,6 +225,11 @@ public class UITalerServerController(
 
     [HttpPost("generate-token")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Generates and stores a merchant API token for private API access.
+    /// Inputs: base URL, instance ID, and instance password.
+    /// Output: updated token in settings and redirect status.
+    /// </summary>
     public async Task<IActionResult> GenerateToken(TalerServerConfigViewModel? form)
     {
         var settings = await GetSettings();
@@ -259,6 +287,11 @@ public class UITalerServerController(
 
     [HttpPost("refresh-bank-accounts")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Fetches current merchant bank accounts to validate payout wiring setup.
+    /// Inputs: resolved backend URL, instance, and API token.
+    /// Output: redirect with success/error status.
+    /// </summary>
     public async Task<IActionResult> RefreshBankAccounts(TalerServerConfigViewModel? form)
     {
         var settings = await GetSettings();
@@ -296,6 +329,11 @@ public class UITalerServerController(
 
     [HttpPost("bank-accounts/add")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Adds a payto account to the merchant instance for settlement wiring.
+    /// Inputs: payto URI, optional facade URL, and backend credentials.
+    /// Output: redirect with operation status.
+    /// </summary>
     public async Task<IActionResult> AddBankAccount(TalerAddBankAccountViewModel model, TalerServerConfigViewModel? form)
     {
         if (!ModelState.IsValid)
@@ -343,6 +381,11 @@ public class UITalerServerController(
 
     [HttpPost("assets/add")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Adds or updates a manual asset entry in server settings.
+    /// Inputs: manual asset form fields.
+    /// Output: persisted asset list and redirect status.
+    /// </summary>
     public async Task<IActionResult> AddManualAsset(TalerAddManualAssetViewModel model)
     {
         if (!ModelState.IsValid)
@@ -392,6 +435,11 @@ public class UITalerServerController(
 
     [HttpPost("assets/{assetCode}/delete")]
     [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Removes a manual/discovered asset from server settings.
+    /// Inputs: asset code from route.
+    /// Output: updated settings and redirect status.
+    /// </summary>
     public async Task<IActionResult> DeleteAsset(string assetCode)
     {
         var settings = await GetSettings();
@@ -411,11 +459,21 @@ public class UITalerServerController(
         return RedirectToAction(nameof(GetServerConfig));
     }
 
+    /// <summary>
+    /// Reads plugin server settings from BTCPay settings storage.
+    /// Inputs: settings repository and plugin key.
+    /// Output: current settings object or defaults.
+    /// </summary>
     private async Task<TalerServerSettings> GetSettings()
     {
         return await settingsRepository.GetSettingAsync<TalerServerSettings>(TalerPlugin.ServerSettingsKey) ?? new TalerServerSettings();
     }
 
+    /// <summary>
+    /// Computes a default internal merchant URL based on runtime environment.
+    /// Inputs: optional BTCPAY_TALER_MERCHANT_URL env var and container flag.
+    /// Output: default merchant base URL string.
+    /// </summary>
     private static string GetDefaultMerchantBaseUrl()
     {
         var configured = Environment.GetEnvironmentVariable("BTCPAY_TALER_MERCHANT_URL");
@@ -427,6 +485,11 @@ public class UITalerServerController(
             : "http://localhost:9966/";
     }
 
+    /// <summary>
+    /// Maps persisted settings to the server configuration view model.
+    /// Inputs: <see cref="TalerServerSettings"/> values.
+    /// Output: populated view model for Razor rendering.
+    /// </summary>
     private static TalerServerConfigViewModel Map(TalerServerSettings settings)
     {
         return new TalerServerConfigViewModel
@@ -442,6 +505,11 @@ public class UITalerServerController(
         };
     }
 
+    /// <summary>
+    /// Resolves backend access values from posted form with fallback to stored settings.
+    /// Inputs: optional form values and persisted server settings.
+    /// Output: normalized tuple of base URL, instance ID, and API token.
+    /// </summary>
     private static (string? BaseUrl, string? InstanceId, string? ApiToken) ResolveBackendAccess(TalerServerConfigViewModel? form, TalerServerSettings settings)
     {
         var baseUrl = string.IsNullOrWhiteSpace(form?.MerchantBaseUrl) ? settings.MerchantBaseUrl : form!.MerchantBaseUrl.Trim();
@@ -452,6 +520,11 @@ public class UITalerServerController(
         return (baseUrl, instanceId, apiToken);
     }
 
+    /// <summary>
+    /// Loads bank accounts from merchant backend and writes them into the view model.
+    /// Inputs: resolved backend URL, instance, and API token.
+    /// Output: <see cref="TalerServerConfigViewModel.BankAccounts"/> or error message.
+    /// </summary>
     private async Task PopulateBankAccounts(TalerServerConfigViewModel vm, string? baseUrl, string? instanceId, string? apiToken)
     {
         if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(apiToken))
@@ -473,6 +546,11 @@ public class UITalerServerController(
         }
     }
 
+    /// <summary>
+    /// Reuses current secret when masked/empty input is posted from UI.
+    /// Inputs: posted value and existing secret.
+    /// Output: normalized secret used for transient operations.
+    /// </summary>
     private static string? NormalizeSecretInput(string? input, string? currentValue)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -485,6 +563,11 @@ public class UITalerServerController(
         return trimmed;
     }
 
+    /// <summary>
+    /// Updates persisted secret with posted value while honoring mask semantics.
+    /// Inputs: current secret and new form input.
+    /// Output: new stored secret (or null if explicitly cleared).
+    /// </summary>
     private static string? UpdateSecret(string? currentValue, string? input)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -497,6 +580,11 @@ public class UITalerServerController(
         return trimmed;
     }
 
+    /// <summary>
+    /// Converts persisted asset settings to a UI asset row.
+    /// Inputs: <see cref="TalerAssetSettingsItem"/>.
+    /// Output: <see cref="TalerAssetViewModel"/> for editing.
+    /// </summary>
     private static TalerAssetViewModel Map(TalerAssetSettingsItem asset)
     {
         return new TalerAssetViewModel
@@ -510,6 +598,11 @@ public class UITalerServerController(
         };
     }
 
+    /// <summary>
+    /// Converts UI asset row back to persisted asset settings.
+    /// Inputs: <see cref="TalerAssetViewModel"/> values from form post.
+    /// Output: sanitized <see cref="TalerAssetSettingsItem"/> for storage.
+    /// </summary>
     private static TalerAssetSettingsItem Map(TalerAssetViewModel asset)
     {
         return new TalerAssetSettingsItem

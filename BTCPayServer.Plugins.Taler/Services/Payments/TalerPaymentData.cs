@@ -1,3 +1,6 @@
+// Persisted payment payload attached to BTCPay payments settled through Taler.
+// Inputs: order status/prompt data captured by listener.
+// Output: serialized details shown in invoice payment data UI.
 namespace BTCPayServer.Plugins.Taler.Services.Payments;
 
 public class TalerPaymentData
