@@ -11,7 +11,7 @@ services:
 
   taler-merchant:
     restart: unless-stopped
-    image: rachyand/taler-merchant:0.0.0.36
+    image: rachyand/taler-merchant:latest
     environment:
       TALER_MERCHANT_PORT: ${TALER_MERCHANT_PORT:-9966}
       TALER_MERCHANT_BASE_URL: ${TALER_MERCHANT_BASE_URL:-http://taler-merchant:9966/}
