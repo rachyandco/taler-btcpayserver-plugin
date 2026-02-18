@@ -1,7 +1,7 @@
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG DEBIAN_CODENAME=bookworm
+ARG DEBIAN_CODENAME=trixie
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl gnupg gettext-base \
