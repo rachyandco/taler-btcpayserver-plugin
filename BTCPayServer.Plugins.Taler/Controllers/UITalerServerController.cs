@@ -379,6 +379,58 @@ public class UITalerServerController(
         return RedirectToAction(nameof(GetServerConfig));
     }
 
+    [HttpPost("bank-accounts/{hWire}/delete")]
+    [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Deletes a bank account from the merchant instance by h_wire.
+    /// Inputs: account h_wire and backend credentials from form/settings.
+    /// Output: redirect with operation status.
+    /// </summary>
+    public async Task<IActionResult> DeleteBankAccount(string hWire, TalerServerConfigViewModel? form)
+    {
+        if (string.IsNullOrWhiteSpace(hWire))
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "Invalid bank account identifier.",
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+            return RedirectToAction(nameof(GetServerConfig));
+        }
+
+        var settings = await GetSettings();
+        var (baseUrl, instanceId, apiToken) = ResolveBackendAccess(form, settings);
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(apiToken))
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "Set merchant base URL, instance ID and API token before deleting a bank account.",
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+            return RedirectToAction(nameof(GetServerConfig));
+        }
+
+        try
+        {
+            await talerMerchantClient.DeleteBankAccountAsync(baseUrl, instanceId, apiToken, hWire.Trim(), HttpContext.RequestAborted);
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "Bank account deleted from merchant instance.",
+                Severity = StatusMessageModel.StatusSeverity.Success
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = $"Failed to delete bank account: {ex.Message}",
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+        }
+
+        return RedirectToAction(nameof(GetServerConfig));
+    }
+
     [HttpPost("assets/{assetCode}/delete")]
     [ValidateAntiForgeryToken]
     /// <summary>
@@ -489,6 +541,35 @@ public class UITalerServerController(
         catch (Exception ex)
         {
             vm.BankAccountsError = ex.Message;
+        }
+
+        try
+        {
+            var kycEntries = await talerMerchantClient.GetKycAsync(baseUrl, instanceId, apiToken, HttpContext.RequestAborted);
+            vm.KycEntries = kycEntries.Select(k => new TalerKycEntryViewModel
+            {
+                PaytoUri = k.PaytoUri,
+                HWire = k.HWire,
+                Status = k.Status,
+                ExchangeUrl = k.ExchangeUrl,
+                ExchangeCurrency = k.ExchangeCurrency,
+                NoKeys = k.NoKeys,
+                AuthConflict = k.AuthConflict,
+                ExchangeHttpStatus = k.ExchangeHttpStatus,
+                ExchangeCode = k.ExchangeCode,
+                PaytoKycAuths = k.PaytoKycAuths.ToList(),
+                Limits = k.Limits.Select(l => new TalerKycLimitViewModel
+                {
+                    OperationType = l.OperationType,
+                    TimeframeMicros = l.TimeframeMicros,
+                    Threshold = l.Threshold,
+                    SoftLimit = l.SoftLimit
+                }).ToList()
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            vm.KycError = ex.Message;
         }
     }
 

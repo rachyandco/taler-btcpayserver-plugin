@@ -16,6 +16,19 @@ namespace BTCPayServer.Plugins.Taler.Services;
 
 public record TalerDiscoveredAsset(string AssetCode, string DisplayName, int Divisibility, string? Symbol);
 public record TalerBankAccount(string PaytoUri, string HWire, bool Active);
+public record TalerKycLimit(string OperationType, long TimeframeMicros, string Threshold, bool SoftLimit);
+public record TalerKycEntry(
+    string PaytoUri,
+    string HWire,
+    string Status,
+    string ExchangeUrl,
+    string ExchangeCurrency,
+    bool NoKeys,
+    bool AuthConflict,
+    int? ExchangeHttpStatus,
+    int? ExchangeCode,
+    IReadOnlyList<string> PaytoKycAuths,
+    IReadOnlyList<TalerKycLimit> Limits);
 
 public record TalerOrderStatus(string OrderId, string? TalerPayUri, bool Paid, decimal? Amount, string? Currency);
 public record TalerConfig(bool SelfProvisioning);
@@ -76,6 +89,115 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessStatusCode(response, "add bank account");
+    }
+
+    /// <summary>
+    /// Reads KYC status entries for all merchant bank accounts/exchanges.
+    /// Inputs: base URL, instance ID, API token, cancellation token.
+    /// Output: list of per-account/per-exchange KYC state and limits.
+    /// </summary>
+    public async Task<IReadOnlyList<TalerKycEntry>> GetKycAsync(string baseUrl, string instanceId, string apiToken, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, BuildInstancePrivateUri(baseUrl, instanceId, "kyc"));
+        AddAuthorization(request, apiToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessStatusCode(response, "get kyc status");
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!json.RootElement.TryGetProperty("kyc_data", out var dataProp) || dataProp.ValueKind != JsonValueKind.Array)
+            return Array.Empty<TalerKycEntry>();
+
+        var result = new List<TalerKycEntry>();
+        foreach (var item in dataProp.EnumerateArray())
+        {
+            var payto = item.TryGetProperty("payto_uri", out var paytoProp) ? paytoProp.GetString() : null;
+            var hWire = item.TryGetProperty("h_wire", out var hWireProp) ? hWireProp.GetString() : null;
+            var status = item.TryGetProperty("status", out var statusProp) ? statusProp.GetString() : null;
+            var exchangeUrl = item.TryGetProperty("exchange_url", out var exchangeUrlProp) ? exchangeUrlProp.GetString() : null;
+            var exchangeCurrency = item.TryGetProperty("exchange_currency", out var exchangeCurrencyProp) ? exchangeCurrencyProp.GetString() : null;
+
+            if (string.IsNullOrWhiteSpace(payto) ||
+                string.IsNullOrWhiteSpace(hWire) ||
+                string.IsNullOrWhiteSpace(status) ||
+                string.IsNullOrWhiteSpace(exchangeUrl) ||
+                string.IsNullOrWhiteSpace(exchangeCurrency))
+                continue;
+
+            var noKeys = item.TryGetProperty("no_keys", out var noKeysProp) && noKeysProp.ValueKind == JsonValueKind.True;
+            var authConflict = item.TryGetProperty("auth_conflict", out var authConflictProp) && authConflictProp.ValueKind == JsonValueKind.True;
+
+            int? exchangeHttpStatus = null;
+            if (item.TryGetProperty("exchange_http_status", out var exchangeHttpStatusProp) && exchangeHttpStatusProp.ValueKind == JsonValueKind.Number)
+                exchangeHttpStatus = exchangeHttpStatusProp.GetInt32();
+
+            int? exchangeCode = null;
+            if (item.TryGetProperty("exchange_code", out var exchangeCodeProp) && exchangeCodeProp.ValueKind == JsonValueKind.Number)
+                exchangeCode = exchangeCodeProp.GetInt32();
+
+            var paytoKycAuths = new List<string>();
+            if (item.TryGetProperty("payto_kycauths", out var authsProp) && authsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var auth in authsProp.EnumerateArray())
+                {
+                    if (auth.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(auth.GetString()))
+                        paytoKycAuths.Add(auth.GetString()!);
+                }
+            }
+
+            var limits = new List<TalerKycLimit>();
+            if (item.TryGetProperty("limits", out var limitsProp) && limitsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var limit in limitsProp.EnumerateArray())
+                {
+                    var operationType = limit.TryGetProperty("operation_type", out var operationTypeProp) ? operationTypeProp.GetString() : null;
+                    var threshold = limit.TryGetProperty("threshold", out var thresholdProp) ? thresholdProp.GetString() : null;
+                    if (string.IsNullOrWhiteSpace(operationType) || string.IsNullOrWhiteSpace(threshold))
+                        continue;
+
+                    var timeframeMicros = 0L;
+                    if (limit.TryGetProperty("timeframe", out var timeframeProp) &&
+                        timeframeProp.ValueKind == JsonValueKind.Object &&
+                        timeframeProp.TryGetProperty("d_us", out var durationProp))
+                    {
+                        timeframeMicros = ParseLong(durationProp) ?? 0L;
+                    }
+
+                    var softLimit = limit.TryGetProperty("soft_limit", out var softLimitProp) && softLimitProp.ValueKind == JsonValueKind.True;
+                    limits.Add(new TalerKycLimit(operationType!, timeframeMicros, threshold!, softLimit));
+                }
+            }
+
+            result.Add(new TalerKycEntry(
+                payto!,
+                hWire!,
+                status!,
+                exchangeUrl!,
+                exchangeCurrency!,
+                noKeys,
+                authConflict,
+                exchangeHttpStatus,
+                exchangeCode,
+                paytoKycAuths,
+                limits));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Deletes one bank account from a merchant instance.
+    /// Inputs: backend coordinates, API token, and account h_wire hash.
+    /// Output: none; throws on HTTP/API errors.
+    /// </summary>
+    public async Task DeleteBankAccountAsync(string baseUrl, string instanceId, string apiToken, string hWire, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Delete, BuildInstancePrivateUri(baseUrl, instanceId, $"accounts/{hWire}"));
+        AddAuthorization(request, apiToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessStatusCode(response, "delete bank account");
     }
 
     /// <summary>
@@ -454,5 +576,20 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
 
         // Support both legacy secret-token credentials and modern bearer tokens.
         request.Headers.Authorization = AuthenticationHeaderValue.Parse($"Bearer {token}");
+    }
+
+    /// <summary>
+    /// Parses long values represented as JSON number or numeric string.
+    /// Inputs: JSON scalar token.
+    /// Output: parsed long value or null.
+    /// </summary>
+    private static long? ParseLong(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Number)
+            return element.GetInt64();
+        if (element.ValueKind == JsonValueKind.String &&
+            long.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+        return null;
     }
 }

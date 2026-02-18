@@ -147,6 +147,7 @@
             <th>Payto URI</th>
             <th>H_wire</th>
             <th>Active</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -161,13 +162,111 @@
                     <span class="me-2 btcpay-status btcpay-status--@(account.Active ? "enabled" : "pending")"></span>
                     @(account.Active ? "Yes" : "No")
                 </td>
+                <td>
+                    <form method="post" asp-action="DeleteBankAccount" asp-route-hWire="@account.HWire">
+                        <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
+                        <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
+                        <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
+                        <button type="submit" class="btn btn-link p-0">Delete</button>
+                    </form>
+                </td>
             </tr>
         }
     }
     else
     {
         <tr>
-            <td colspan="3" class="text-muted">No bank accounts found for this instance.</td>
+            <td colspan="4" class="text-muted">No bank accounts found for this instance.</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+<div class="d-flex align-items-center justify-content-between mb-2 mt-4">
+    <h4 class="mb-0">KYC status</h4>
+</div>
+@if (!string.IsNullOrWhiteSpace(Model.KycError))
+{
+    <div class="alert alert-warning">
+        Could not load KYC status: @Model.KycError
+    </div>
+}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Payto URI</th>
+            <th>Exchange</th>
+            <th>Status</th>
+            <th>KYC instructions (payto)</th>
+            <th>Limits</th>
+        </tr>
+    </thead>
+    <tbody>
+    @if (Model.KycEntries.Any())
+    {
+        foreach (var entry in Model.KycEntries)
+        {
+            <tr>
+                <td>
+                    <code>@entry.PaytoUri</code>
+                </td>
+                <td>
+                    <div><code>@entry.ExchangeUrl</code></div>
+                    <div class="text-muted">@entry.ExchangeCurrency</div>
+                </td>
+                <td>
+                    <div><strong>@entry.Status</strong></div>
+                    @if (entry.AuthConflict)
+                    {
+                        <div class="text-warning">auth conflict</div>
+                    }
+                    @if (entry.NoKeys)
+                    {
+                        <div class="text-warning">exchange keys unavailable</div>
+                    }
+                    @if (entry.ExchangeHttpStatus is not null || entry.ExchangeCode is not null)
+                    {
+                        <div class="text-muted">HTTP @entry.ExchangeHttpStatus / code @entry.ExchangeCode</div>
+                    }
+                </td>
+                <td>
+                    @if (entry.PaytoKycAuths.Any())
+                    {
+                        foreach (var instruction in entry.PaytoKycAuths)
+                        {
+                            <div><code>@instruction</code></div>
+                        }
+                    }
+                    else
+                    {
+                        <span class="text-muted">No KYC payment instruction</span>
+                    }
+                </td>
+                <td>
+                    @if (entry.Limits.Any())
+                    {
+                        foreach (var limit in entry.Limits)
+                        {
+                            <div class="mb-1">
+                                <strong>@limit.OperationType</strong>:
+                                @limit.Threshold
+                                over @FormatTimeframe(limit.TimeframeMicros)
+                                (@(limit.SoftLimit ? "soft" : "hard"))
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <span class="text-muted">No limits returned</span>
+                    }
+                </td>
+            </tr>
+        }
+    }
+    else
+    {
+        <tr>
+            <td colspan="5" class="text-muted">No KYC status data available.</td>
         </tr>
     }
     </tbody>
@@ -190,3 +289,23 @@
     </div>
     <button type="submit" class="btn btn-outline-primary mt-3">Add bank account</button>
 </form>
+
+@functions
+{
+    private static string FormatTimeframe(long micros)
+    {
+        if (micros <= 0)
+            return "all-time";
+
+        var ts = TimeSpan.FromMilliseconds(micros / 1000.0);
+        if (ts.TotalDays >= 365 && Math.Abs(ts.TotalDays % 365) < 0.01)
+            return $"{(int)(ts.TotalDays / 365)} year(s)";
+        if (ts.TotalDays >= 1 && Math.Abs(ts.TotalDays % 1) < 0.01)
+            return $"{(int)ts.TotalDays} day(s)";
+        if (ts.TotalHours >= 1 && Math.Abs(ts.TotalHours % 1) < 0.01)
+            return $"{(int)ts.TotalHours} hour(s)";
+        if (ts.TotalMinutes >= 1 && Math.Abs(ts.TotalMinutes % 1) < 0.01)
+            return $"{(int)ts.TotalMinutes} minute(s)";
+        return $"{(int)ts.TotalSeconds} second(s)";
+    }
+}

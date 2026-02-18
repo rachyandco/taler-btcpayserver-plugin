@@ -28,6 +28,8 @@ public class TalerServerConfigViewModel
     public List<TalerAssetViewModel> Assets { get; set; } = [];
     public List<TalerBankAccountViewModel> BankAccounts { get; set; } = [];
     public string? BankAccountsError { get; set; }
+    public List<TalerKycEntryViewModel> KycEntries { get; set; } = [];
+    public string? KycError { get; set; }
 }
 
 public class TalerAssetViewModel
@@ -45,6 +47,29 @@ public class TalerBankAccountViewModel
     public string PaytoUri { get; set; } = "";
     public string HWire { get; set; } = "";
     public bool Active { get; set; }
+}
+
+public class TalerKycEntryViewModel
+{
+    public string PaytoUri { get; set; } = "";
+    public string HWire { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string ExchangeUrl { get; set; } = "";
+    public string ExchangeCurrency { get; set; } = "";
+    public bool NoKeys { get; set; }
+    public bool AuthConflict { get; set; }
+    public int? ExchangeHttpStatus { get; set; }
+    public int? ExchangeCode { get; set; }
+    public List<string> PaytoKycAuths { get; set; } = [];
+    public List<TalerKycLimitViewModel> Limits { get; set; } = [];
+}
+
+public class TalerKycLimitViewModel
+{
+    public string OperationType { get; set; } = "";
+    public long TimeframeMicros { get; set; }
+    public string Threshold { get; set; } = "";
+    public bool SoftLimit { get; set; }
 }
 
 public class TalerAddBankAccountViewModel
