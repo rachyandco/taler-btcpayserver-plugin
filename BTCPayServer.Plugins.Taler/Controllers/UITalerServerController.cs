@@ -379,60 +379,6 @@ public class UITalerServerController(
         return RedirectToAction(nameof(GetServerConfig));
     }
 
-    [HttpPost("assets/add")]
-    [ValidateAntiForgeryToken]
-    /// <summary>
-    /// Adds or updates a manual asset entry in server settings.
-    /// Inputs: manual asset form fields.
-    /// Output: persisted asset list and redirect status.
-    /// </summary>
-    public async Task<IActionResult> AddManualAsset(TalerAddManualAssetViewModel model)
-    {
-        if (!ModelState.IsValid)
-        {
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = "Invalid manual asset entry.",
-                Severity = StatusMessageModel.StatusSeverity.Error
-            });
-            return RedirectToAction(nameof(GetServerConfig));
-        }
-
-        var settings = await GetSettings();
-        var code = model.AssetCode.Trim();
-        var existing = settings.Assets.FirstOrDefault(a => string.Equals(a.AssetCode, code, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-        {
-            existing.DisplayName = model.DisplayName.Trim();
-            existing.Divisibility = model.Divisibility;
-            existing.Symbol = string.IsNullOrWhiteSpace(model.Symbol) ? null : model.Symbol.Trim();
-            existing.Enabled = model.Enabled;
-            existing.IsManual = true;
-        }
-        else
-        {
-            settings.Assets.Add(new TalerAssetSettingsItem
-            {
-                AssetCode = code,
-                DisplayName = model.DisplayName.Trim(),
-                Divisibility = model.Divisibility,
-                Symbol = string.IsNullOrWhiteSpace(model.Symbol) ? null : model.Symbol.Trim(),
-                Enabled = model.Enabled,
-                IsManual = true
-            });
-        }
-
-        await settingsRepository.UpdateSetting(settings, TalerPlugin.ServerSettingsKey);
-
-        TempData.SetStatusMessageModel(new StatusMessageModel
-        {
-            Message = $"Manual asset {code} added.",
-            Severity = StatusMessageModel.StatusSeverity.Success
-        });
-
-        return RedirectToAction(nameof(GetServerConfig));
-    }
-
     [HttpPost("assets/{assetCode}/delete")]
     [ValidateAntiForgeryToken]
     /// <summary>

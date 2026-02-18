@@ -40,27 +40,6 @@ public class TalerAssetViewModel
     public bool IsManual { get; set; }
 }
 
-public class TalerAddManualAssetViewModel
-{
-    [Required]
-    [Display(Name = "Asset code")]
-    public string AssetCode { get; set; } = "";
-
-    [Required]
-    [Display(Name = "Display name")]
-    public string DisplayName { get; set; } = "";
-
-    [Range(0, 18)]
-    [Display(Name = "Divisibility")]
-    public int Divisibility { get; set; }
-
-    [Display(Name = "Symbol")]
-    public string? Symbol { get; set; }
-
-    [Display(Name = "Enable asset")]
-    public bool Enabled { get; set; } = true;
-}
-
 public class TalerBankAccountViewModel
 {
     public string PaytoUri { get; set; } = "";
