@@ -196,7 +196,12 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         var payload = new
         {
             scope,
-            refreshable = false
+            refreshable = false,
+            // Request a non-expiring token; backend may still enforce policy limits.
+            duration = new
+            {
+                d_us = "forever"
+            }
         };
 
         var request = new HttpRequestMessage(HttpMethod.Post, BuildInstancePrivateUri(baseUrl, instanceId, "token"))
