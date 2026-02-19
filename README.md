@@ -13,11 +13,19 @@ This plugin can break between BTCPay or Taler upgrades and should be deployed wi
 3. Ensure merchant template contains `BASE_URL = "${TALER_MERCHANT_BASE_URL}"`.
 4. Set `/root/BTCPayServer/.env`: `TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/`.
 5. Ensure fragment passes `TALER_MERCHANT_BASE_URL` into `taler-merchant` container environment.
-6. Configure nginx route: `/taler-merchant/ -> http://taler-merchant:9966/`.
-7. Block public access to `/taler-merchant/*private*` and `/taler-merchant/management*`.
-8. In `Server settings -> Taler`: set internal `Merchant base URL` and public `Merchant public base URL`.
-9. Initialize instance, generate API token, add bank account, fetch/enable assets, then restart BTCPay.
-10. Create a fresh invoice and verify QR/Pay link uses valid `taler://pay/...` URI and payment is detected.
+6. Update nginx policies to block public access to taler merchant 
+7. In `Server settings -> Taler`: set internal `Merchant base URL` and public `Merchant public base URL`.
+8. Initialize instance, generate API token, add bank account, fetch/enable assets, then restart BTCPay.
+9. Create a fresh invoice and verify QR/Pay link uses valid `taler://pay/...` URI and payment is detected.
+
+## Add a bank account
+
+Use the following Payto URI format: `payto://iban/CH00000000000000000000?receiver-name=My%20Company%SA`
+
+In order to receive CHF from `taler-ops.ch` you will have to have your iban added and follow the instructions:
+
+If the bank account status is `kyc-wire-required` you will need to send from the same bank account the smallest amount possible to the payto instructions. It might take 1 or 2 days to complete.
+
 
 ## Features
 - Server-level Taler settings UI
