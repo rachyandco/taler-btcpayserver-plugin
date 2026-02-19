@@ -1,0 +1,36 @@
+name: Build Plugin
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore BTCPayServer.Plugins.Taler.sln
+
+      - name: Build
+        run: dotnet build BTCPayServer.Plugins.Taler/BTCPayServer.Plugins.Taler.csproj -c Release --no-restore
+
+      - name: Publish plugin
+        run: dotnet publish BTCPayServer.Plugins.Taler/BTCPayServer.Plugins.Taler.csproj -c Release -o artifacts/taler-plugin --no-restore
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: taler-plugin-publish
+          path: artifacts/taler-plugin
