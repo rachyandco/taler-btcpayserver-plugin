@@ -1,6 +1,6 @@
 # BTCPayServer GNU Taler Plugin
 
-BTCPay plugin to accept GNU Taler payments with multi-asset support (`CHF`, `KUDOS`, and manual assets).
+BTCPay plugin to accept GNU Taler payments with multi-asset support (`CHF`, `KUDOS`).
 
 ## Warning
 This is experimental software.
@@ -23,7 +23,6 @@ This plugin can break between BTCPay or Taler upgrades and should be deployed wi
 - Server-level Taler settings UI
 - Store-level enable/disable per Taler asset
 - Auto-discovery of assets from merchant `/config`
-- Manual asset add/remove
 - Merchant instance self-provisioning from UI (init instance, token generation, bank account checks/add)
 - Invoice checkout integration with Taler QR and wallet link
 - Background payment listener to settle BTCPay invoices when merchant reports paid orders
@@ -56,7 +55,7 @@ Go to `Server settings -> Taler` and configure:
 
 Then:
 - `Initialize instance`
-- `Generate API token` (uses `scope: all`)
+- `Generate API token` (uses `scope: all` and `duration: forever`)
 - `Check bank accounts`
 - `Fetch assets`
 - Save and restart BTCPay when asset set changes
@@ -73,7 +72,7 @@ BTCPAYGEN_ADDITIONAL_FRAGMENTS=...;opt-add-taler-merchant.custom
 
 Set merchant base URL env (used by merchant config template):
 ```bash
-TALER_MERCHANT_BASE_URL=https://pay.example.com/taler-merchant/
+TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/
 ```
 
 Important:
@@ -106,14 +105,14 @@ location /taler-merchant/ {
     proxy_set_header X-Forwarded-Proto https;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
 }
-```
 
-Recommended hardening:
-```nginx
-location ~ ^/taler-merchant/(private|management|instances/[^/]+/private)/ {
+location ~ ^/taler-merchant/(private|webui|management|instances/[^/]+/private)/ {
     return 403;
 }
 ```
+
+add this in `/var/lib/docker/volumes/generated_nginx_vhost/_data/<your-host>`
+
 
 ## API/token notes
 - Merchant private API calls use `Authorization: Bearer secret-token:...`
@@ -125,6 +124,44 @@ location ~ ^/taler-merchant/(private|management|instances/[^/]+/private)/ {
 - `no active bank account` (`code: 2500`): add bank account to the instance.
 - `legal limits` (`code: 2513`): exchange/KYC constraint, not a BTCPay plugin bug.
 - Asset list empty until restart: restart BTCPay after changing enabled assets.
+
+## Some CLI commands
+
+Run the following commands inside BTCPayServer, replace `secret-token:yoursecret` with the `Merchant API token`
+
+- Read Merchant Backend config (public endpoint)
+```
+docker run --rm --network generated_default curlimages/curl:8.12.1 -sS  http://taler-merchant:9966/config
+```
+
+- Read all accounts in Merchant Backend
+```
+docker run --rm --network generated_default curlimages/curl:8.12.1 -i -sS \
+    -H "Authorization: Bearer secret-token:yoursecret" \
+    "http://taler-merchant:9966/instances/default/private/accounts"
+```
+
+- check KYC status of all accounts
+```
+docker run --rm --network generated_default curlimages/curl:8.12.1 -sS \
+    -H "Authorization: Bearer secret-token:yoursecret" \
+    "http://taler-merchant:9966/instances/default/private/kyc"
+```
+
+- list all orders
+```
+docker run --rm --network generated_default curlimages/curl:8.12.1 -sS \
+    -H "Authorization: Bearer secret-token:yoursecret" \
+    "http://taler-merchant:9966/instances/default/private/orders"
+```
+
+- list all paid and wired orders
+```
+docker run --rm --network generated_default curlimages/curl:8.12.1 -sS \
+    -H "Authorization: Bearer secret-token:yoursecret" \
+    "http://taler-merchant:9966/instances/default/private/orders?paid=yes&wired=yes&delta=-50"
+```
+
 
 ## License
 GPLv3. See `LICENSE`.
