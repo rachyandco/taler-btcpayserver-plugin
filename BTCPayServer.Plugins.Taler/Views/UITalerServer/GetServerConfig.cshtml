@@ -191,6 +191,18 @@
         Could not load KYC status: @Model.KycError
     </div>
 }
+@{
+    var hiddenUnsupportedCount = Model.KycEntries.Count(e => string.Equals(e.Status, "unsupported-account", StringComparison.OrdinalIgnoreCase));
+    var visibleKycEntries = Model.KycEntries
+        .Where(e => !string.Equals(e.Status, "unsupported-account", StringComparison.OrdinalIgnoreCase))
+        .ToList();
+}
+@if (hiddenUnsupportedCount > 0)
+{
+    <div class="alert alert-info py-2">
+        Hidden @hiddenUnsupportedCount unsupported account entr@(hiddenUnsupportedCount == 1 ? "y" : "ies").
+    </div>
+}
 <table class="table table-striped">
     <thead>
         <tr>
@@ -202,9 +214,9 @@
         </tr>
     </thead>
     <tbody>
-    @if (Model.KycEntries.Any())
+    @if (visibleKycEntries.Any())
     {
-        foreach (var entry in Model.KycEntries)
+        foreach (var entry in visibleKycEntries)
         {
             <tr>
                 <td>
@@ -215,7 +227,7 @@
                     <div class="text-muted">@entry.ExchangeCurrency</div>
                 </td>
                 <td>
-                    <div><strong>@entry.Status</strong></div>
+                    <div><span class="badge @GetKycStatusBadgeClass(entry.Status)">@entry.Status</span></div>
                     @if (entry.AuthConflict)
                     {
                         <div class="text-warning">auth conflict</div>
@@ -239,7 +251,14 @@
                     }
                     else
                     {
-                        <span class="text-muted">No KYC payment instruction</span>
+                        @if (IsKycActionRequired(entry.Status))
+                        {
+                            <span class="text-warning">Action required but no payto instruction provided by backend</span>
+                        }
+                        else
+                        {
+                            <span class="text-muted">No KYC payment instruction</span>
+                        }
                     }
                 </td>
                 <td>
@@ -307,5 +326,37 @@
         if (ts.TotalMinutes >= 1 && Math.Abs(ts.TotalMinutes % 1) < 0.01)
             return $"{(int)ts.TotalMinutes} minute(s)";
         return $"{(int)ts.TotalSeconds} second(s)";
+    }
+
+    private static bool IsKycActionRequired(string status)
+    {
+        return string.Equals(status, "kyc-wire-required", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(status, "kyc-required", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetKycStatusBadgeClass(string status)
+    {
+        if (string.Equals(status, "ready", StringComparison.OrdinalIgnoreCase))
+            return "text-bg-success";
+        if (string.Equals(status, "awaiting-aml-review", StringComparison.OrdinalIgnoreCase))
+            return "text-bg-info";
+
+        if (string.Equals(status, "kyc-wire-required", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "kyc-required", StringComparison.OrdinalIgnoreCase))
+            return "text-bg-warning";
+
+        if (string.Equals(status, "kyc-wire-impossible", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "logic-bug", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "exchange-status-invalid", StringComparison.OrdinalIgnoreCase))
+            return "text-bg-danger";
+
+        if (string.Equals(status, "no-exchange-keys", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "merchant-internal-error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "exchange-internal-error", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "exchange-gateway-timeout", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "exchange-unreachable", StringComparison.OrdinalIgnoreCase))
+            return "text-bg-warning";
+
+        return "text-bg-secondary";
     }
 }
