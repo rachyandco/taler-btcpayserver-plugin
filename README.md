@@ -22,9 +22,13 @@ This plugin can break between BTCPay or Taler upgrades and should be deployed wi
 
 Use the following Payto URI format: `payto://iban/CH00000000000000000000?receiver-name=My%20Company%SA`
 
+Warning: only CHF iban are currently supported by the Taler exchange.
+
 In order to receive CHF from `taler-ops.ch` you will have to have your iban added and follow the instructions:
 
 If the bank account status is `kyc-wire-required` you will need to send from the same bank account the smallest amount possible to the payto instructions. It might take 1 or 2 days to complete.
+
+Once the bank account is on status `kyc-required` you will be requested to validate the Terms of Services of the Taler exchange.
 
 
 ## Features
@@ -126,6 +130,28 @@ add this in `/var/lib/docker/volumes/generated_nginx_vhost/_data/<your-host>`
 - Merchant private API calls use `Authorization: Bearer secret-token:...`
 - Token scope must allow required operations. `all` is used for provisioning flows.
 - If you see `401` on private endpoints, regenerate token and save it in BTCPay.
+
+## Merchant API endpoints (used in this project)
+There is no runtime "list all endpoints" endpoint in `taler-merchant`.  
+For backend `20:0:8`, these are the relevant endpoints this plugin/deployment uses:
+
+- Public:
+  - `GET /config`
+  - `GET /instances/{instance}/orders/{order_id}?token={claim_token}`
+- Provisioning/management:
+  - `POST /management/instances`
+- Instance private (Bearer token):
+  - `POST /instances/{instance}/private/token`
+  - `GET /instances/{instance}/private/accounts`
+  - `POST /instances/{instance}/private/accounts`
+  - `DELETE /instances/{instance}/private/accounts/{h_wire}`
+  - `GET /instances/{instance}/private/kyc`
+  - `GET /instances/{instance}/private/orders`
+  - `POST /instances/{instance}/private/orders`
+  - `GET /instances/{instance}/private/orders/{order_id}`
+
+Canonical upstream reference:
+- https://docs.taler.net/core/api-merchant.html
 
 ## Common issues
 - `instance not found` (`code: 2000`): initialize instance first.
