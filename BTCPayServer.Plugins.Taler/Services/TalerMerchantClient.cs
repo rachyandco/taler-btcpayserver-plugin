@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -17,6 +18,7 @@ namespace BTCPayServer.Plugins.Taler.Services;
 public record TalerDiscoveredAsset(string AssetCode, string DisplayName, int Divisibility, string? Symbol);
 public record TalerBankAccount(string PaytoUri, string HWire, bool Active);
 public record TalerKycLimit(string OperationType, long TimeframeMicros, string Threshold, bool SoftLimit);
+public record TalerExchangeKycRequirement(string Form, string? Id, string Description, string? TosUrl);
 public record TalerKycEntry(
     string PaytoUri,
     string HWire,
@@ -27,6 +29,7 @@ public record TalerKycEntry(
     bool AuthConflict,
     int? ExchangeHttpStatus,
     int? ExchangeCode,
+    string? AccessToken,
     IReadOnlyList<string> PaytoKycAuths,
     IReadOnlyList<TalerKycLimit> Limits);
 
@@ -136,6 +139,11 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             if (item.TryGetProperty("exchange_code", out var exchangeCodeProp) && exchangeCodeProp.ValueKind == JsonValueKind.Number)
                 exchangeCode = exchangeCodeProp.GetInt32();
 
+            var accessToken = item.TryGetProperty("access_token", out var accessTokenProp) &&
+                              accessTokenProp.ValueKind == JsonValueKind.String
+                ? accessTokenProp.GetString()
+                : null;
+
             var paytoKycAuths = new List<string>();
             if (item.TryGetProperty("payto_kycauths", out var authsProp) && authsProp.ValueKind == JsonValueKind.Array)
             {
@@ -179,6 +187,7 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                 authConflict,
                 exchangeHttpStatus,
                 exchangeCode,
+                accessToken,
                 paytoKycAuths,
                 limits));
         }
@@ -198,6 +207,73 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
 
         using var response = await httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessStatusCode(response, "delete bank account");
+    }
+
+    /// <summary>
+    /// Loads exchange-side KYC requirements for a given access token.
+    /// Inputs: exchange URL and KYC access token.
+    /// Output: parsed requirement list (including accept-tos metadata when present).
+    /// </summary>
+    public async Task<IReadOnlyList<TalerExchangeKycRequirement>> GetExchangeKycInfoAsync(string exchangeUrl, string accessToken, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(exchangeUrl) || string.IsNullOrWhiteSpace(accessToken))
+            return Array.Empty<TalerExchangeKycRequirement>();
+
+        var uri = BuildUri(exchangeUrl, $"kyc-info/{accessToken}");
+        using var response = await httpClient.GetAsync(uri, cancellationToken);
+        await EnsureSuccessStatusCode(response, "get exchange kyc info");
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!json.RootElement.TryGetProperty("requirements", out var requirementsProp) || requirementsProp.ValueKind != JsonValueKind.Array)
+            return Array.Empty<TalerExchangeKycRequirement>();
+
+        var result = new List<TalerExchangeKycRequirement>();
+        foreach (var req in requirementsProp.EnumerateArray())
+        {
+            var form = req.TryGetProperty("form", out var formProp) ? formProp.GetString() : null;
+            var description = req.TryGetProperty("description", out var descriptionProp) ? descriptionProp.GetString() : null;
+            if (string.IsNullOrWhiteSpace(form) || string.IsNullOrWhiteSpace(description))
+                continue;
+
+            var id = req.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+            string? tosUrl = null;
+            if (req.TryGetProperty("context", out var contextProp) &&
+                contextProp.ValueKind == JsonValueKind.Object &&
+                contextProp.TryGetProperty("tos_url", out var tosUrlProp) &&
+                tosUrlProp.ValueKind == JsonValueKind.String)
+            {
+                tosUrl = tosUrlProp.GetString();
+            }
+
+            result.Add(new TalerExchangeKycRequirement(form!, id, description!, tosUrl));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Submits acceptance for a ToS KYC requirement.
+    /// Inputs: exchange URL, requirement ID and accepted ToS value.
+    /// Output: none; throws on non-success HTTP responses.
+    /// </summary>
+    public async Task AcceptExchangeTosAsync(string exchangeUrl, string requirementId, string formId, string acceptedTos, CancellationToken cancellationToken)
+    {
+        var uploadUri = BuildKycUploadUri(exchangeUrl, requirementId);
+        var acceptedTermsValue = await ResolveAcceptedTermsValueAsync(exchangeUrl, acceptedTos, cancellationToken);
+        var payload = new
+        {
+            FORM_ID = formId,
+            ACCEPTED_TERMS_OF_SERVICE = acceptedTermsValue,
+            DOWNLOADED_TERMS_OF_SERVICE = true
+        };
+        var request = new HttpRequestMessage(HttpMethod.Post, uploadUri)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
+        };
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessStatusCode(response, "accept exchange terms");
     }
 
     /// <summary>
@@ -591,5 +667,80 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             long.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
             return parsed;
         return null;
+    }
+
+    /// <summary>
+    /// Builds KYC upload URI preserving embedded path/query from requirement ID.
+    /// Inputs: exchange URL and requirement ID from /kyc-info.
+    /// Output: absolute /kyc-upload URI.
+    /// </summary>
+    private static Uri BuildKycUploadUri(string exchangeUrl, string requirementId)
+    {
+        var trimmed = exchangeUrl.TrimEnd('/');
+        var normalizedId = requirementId.TrimStart('/');
+        return new Uri($"{trimmed}/kyc-upload/{normalizedId}");
+    }
+
+    /// <summary>
+    /// Resolves accepted terms value expected by exchange (prefer ToS ETag/version).
+    /// Inputs: exchange URL and candidate value (often ToS URL from requirement context).
+    /// Output: terms version/etag value or fallback input.
+    /// </summary>
+    private async Task<string> ResolveAcceptedTermsValueAsync(string exchangeUrl, string candidate, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+            return "accepted-via-btcpay";
+
+        // If candidate is not a URL, assume it is already a version string.
+        if (!Uri.TryCreate(candidate, UriKind.Absolute, out _))
+            return candidate.Trim();
+
+        var etag = await TryGetEtagAsync(candidate, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(etag))
+            return etag!;
+
+        // Fallback: exchange /terms typically returns the canonical ToS ETag.
+        var termsUri = BuildUri(exchangeUrl, "terms").ToString();
+        etag = await TryGetEtagAsync(termsUri, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(etag))
+            return etag!;
+
+        // Last resort: keep previous behavior.
+        return candidate.Trim();
+    }
+
+    /// <summary>
+    /// Attempts to retrieve HTTP ETag from URL via HEAD (fallback GET).
+    /// Inputs: absolute URL.
+    /// Output: unquoted ETag or null.
+    /// </summary>
+    private async Task<string?> TryGetEtagAsync(string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, url);
+            using var headResponse = await httpClient.SendAsync(headRequest, cancellationToken);
+            var headTag = headResponse.Headers.ETag?.Tag?.Trim('"');
+            if (!string.IsNullOrWhiteSpace(headTag))
+                return headTag;
+        }
+        catch
+        {
+            // Ignore and try GET.
+        }
+
+        try
+        {
+            using var getResponse = await httpClient.GetAsync(url, cancellationToken);
+            var getTag = getResponse.Headers.ETag?.Tag?.Trim('"');
+            if (!string.IsNullOrWhiteSpace(getTag))
+                return getTag;
+            var rawTag = getResponse.Headers.TryGetValues("ETag", out var values) ? values.FirstOrDefault() : null;
+            return string.IsNullOrWhiteSpace(rawTag) ? null : rawTag.Trim().Trim('"');
+        }
+        catch
+        {
+            return null;
+        }
     }
 }

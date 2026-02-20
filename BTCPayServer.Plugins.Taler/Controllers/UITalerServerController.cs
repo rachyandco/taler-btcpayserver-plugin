@@ -431,6 +431,53 @@ public class UITalerServerController(
         return RedirectToAction(nameof(GetServerConfig));
     }
 
+    [HttpPost("kyc/accept-tos")]
+    [ValidateAntiForgeryToken]
+    /// <summary>
+    /// Accepts exchange terms-of-service for a KYC requirement.
+    /// Inputs: exchange URL, requirement ID, ToS URL/text and backend access form values.
+    /// Output: redirect with status message.
+    /// </summary>
+    public async Task<IActionResult> AcceptKycTerms(TalerAcceptKycTermsViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "Invalid KYC terms submission.",
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+            return RedirectToAction(nameof(GetServerConfig));
+        }
+
+        try
+        {
+            var acceptedTos = string.IsNullOrWhiteSpace(model.TosUrl) ? "accepted-via-btcpay" : model.TosUrl.Trim();
+            await talerMerchantClient.AcceptExchangeTosAsync(
+                model.ExchangeUrl.Trim(),
+                model.RequirementId.Trim(),
+                model.FormId.Trim(),
+                acceptedTos,
+                HttpContext.RequestAborted);
+
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = "KYC terms accepted. Refresh status to confirm readiness.",
+                Severity = StatusMessageModel.StatusSeverity.Success
+            });
+        }
+        catch (HttpRequestException ex)
+        {
+            TempData.SetStatusMessageModel(new StatusMessageModel
+            {
+                Message = $"Failed to accept KYC terms: {ex.Message}",
+                Severity = StatusMessageModel.StatusSeverity.Error
+            });
+        }
+
+        return RedirectToAction(nameof(GetServerConfig));
+    }
+
     [HttpPost("assets/{assetCode}/delete")]
     [ValidateAntiForgeryToken]
     /// <summary>
@@ -557,6 +604,7 @@ public class UITalerServerController(
                 AuthConflict = k.AuthConflict,
                 ExchangeHttpStatus = k.ExchangeHttpStatus,
                 ExchangeCode = k.ExchangeCode,
+                AccessToken = k.AccessToken,
                 PaytoKycAuths = k.PaytoKycAuths.ToList(),
                 Limits = k.Limits.Select(l => new TalerKycLimitViewModel
                 {
@@ -566,6 +614,31 @@ public class UITalerServerController(
                     SoftLimit = l.SoftLimit
                 }).ToList()
             }).ToList();
+
+            foreach (var entry in vm.KycEntries.Where(e =>
+                         string.Equals(e.Status, "kyc-required", StringComparison.OrdinalIgnoreCase) &&
+                         !string.IsNullOrWhiteSpace(e.AccessToken)))
+            {
+                try
+                {
+                    var requirements = await talerMerchantClient.GetExchangeKycInfoAsync(
+                        entry.ExchangeUrl,
+                        entry.AccessToken!,
+                        HttpContext.RequestAborted);
+
+                    entry.Requirements = requirements.Select(r => new TalerExchangeKycRequirementViewModel
+                    {
+                        Form = r.Form,
+                        Id = r.Id,
+                        Description = r.Description,
+                        TosUrl = r.TosUrl
+                    }).ToList();
+                }
+                catch
+                {
+                    // Keep KYC row visible even if enrichment request fails.
+                }
+            }
         }
         catch (Exception ex)
         {

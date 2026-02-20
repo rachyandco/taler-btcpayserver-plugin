@@ -60,8 +60,10 @@ public class TalerKycEntryViewModel
     public bool AuthConflict { get; set; }
     public int? ExchangeHttpStatus { get; set; }
     public int? ExchangeCode { get; set; }
+    public string? AccessToken { get; set; }
     public List<string> PaytoKycAuths { get; set; } = [];
     public List<TalerKycLimitViewModel> Limits { get; set; } = [];
+    public List<TalerExchangeKycRequirementViewModel> Requirements { get; set; } = [];
 }
 
 public class TalerKycLimitViewModel
@@ -72,6 +74,14 @@ public class TalerKycLimitViewModel
     public bool SoftLimit { get; set; }
 }
 
+public class TalerExchangeKycRequirementViewModel
+{
+    public string Form { get; set; } = "";
+    public string? Id { get; set; }
+    public string Description { get; set; } = "";
+    public string? TosUrl { get; set; }
+}
+
 public class TalerAddBankAccountViewModel
 {
     [Required]
@@ -80,4 +90,20 @@ public class TalerAddBankAccountViewModel
 
     [Display(Name = "Credit facade URL")]
     public string? CreditFacadeUrl { get; set; }
+}
+
+public class TalerAcceptKycTermsViewModel
+{
+    [Required]
+    public string ExchangeUrl { get; set; } = "";
+
+    [Required]
+    public string RequirementId { get; set; } = "";
+
+    [Required]
+    public string FormId { get; set; } = "";
+
+    public string? AccessToken { get; set; }
+
+    public string? TosUrl { get; set; }
 }

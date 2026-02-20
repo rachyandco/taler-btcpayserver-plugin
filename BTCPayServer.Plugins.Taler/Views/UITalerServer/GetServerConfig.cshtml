@@ -211,6 +211,7 @@
             <th>Status</th>
             <th>KYC instructions (payto)</th>
             <th>Limits</th>
+            <th></th>
         </tr>
     </thead>
     <tbody>
@@ -279,13 +280,30 @@
                         <span class="text-muted">No limits returned</span>
                     }
                 </td>
+                <td>
+                    @if (string.Equals(entry.Status, "kyc-required", StringComparison.OrdinalIgnoreCase) &&
+                         !string.IsNullOrWhiteSpace(entry.AccessToken))
+                    {
+                        var kycSpaUrl = BuildKycSpaUrl(entry.ExchangeUrl, entry.AccessToken!);
+                        <a class="btn btn-sm btn-outline-primary"
+                           href="@kycSpaUrl"
+                           target="_blank"
+                           rel="noopener noreferrer">
+                            Open KYC portal
+                        </a>
+                    }
+                    else
+                    {
+                        <span class="text-muted">No interactive action</span>
+                    }
+                </td>
             </tr>
         }
     }
     else
     {
         <tr>
-            <td colspan="5" class="text-muted">No KYC status data available.</td>
+            <td colspan="6" class="text-muted">No KYC status data available.</td>
         </tr>
     }
     </tbody>
@@ -358,5 +376,11 @@
             return "text-bg-warning";
 
         return "text-bg-secondary";
+    }
+
+    private static string BuildKycSpaUrl(string exchangeUrl, string accessToken)
+    {
+        var baseUrl = exchangeUrl.TrimEnd('/');
+        return $"{baseUrl}/kyc-spa/{Uri.EscapeDataString(accessToken)}";
     }
 }
