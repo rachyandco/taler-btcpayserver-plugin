@@ -327,6 +327,191 @@
     <button type="submit" class="btn btn-outline-primary mt-3">Add bank account</button>
 </form>
 
+<div class="d-flex align-items-center justify-content-between mb-2 mt-4">
+    <h4 class="mb-0">Orders</h4>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="@Url.Action("GetServerConfig", new { ordersPage = Model.OrdersPage, refreshOrders = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() })">
+        Refresh orders
+    </a>
+</div>
+@if (!string.IsNullOrWhiteSpace(Model.OrdersError))
+{
+    <div class="alert alert-warning">
+        Could not load orders: @Model.OrdersError
+    </div>
+}
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Order ID</th>
+            <th>Amount</th>
+            <th>Date/time</th>
+            <th>Paid</th>
+            <th>Refundable</th>
+            <th>Status</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    @if (Model.Orders.Any())
+    {
+        foreach (var order in Model.Orders)
+        {
+            <tr>
+                <td><code>@order.OrderId</code></td>
+                <td>
+                    @if (!string.IsNullOrWhiteSpace(order.Amount))
+                    {
+                        <code>@order.Amount</code>
+                    }
+                    else
+                    {
+                        <span class="text-muted">n/a</span>
+                    }
+                </td>
+                <td>
+                    @if (order.CreatedAt is not null)
+                    {
+                        @order.CreatedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss zzz")
+                    }
+                    else
+                    {
+                        <span class="text-muted">n/a</span>
+                    }
+                </td>
+                <td>
+                    <span class="me-2 btcpay-status btcpay-status--@(order.Paid ? "enabled" : "pending")"></span>
+                    @(order.Paid ? "Yes" : "No")
+                </td>
+                <td>
+                    <span class="me-2 btcpay-status btcpay-status--@(order.Refundable ? "enabled" : "pending")"></span>
+                    @(order.Refundable ? "Yes" : "No")
+                </td>
+                <td>
+                    @if (order.RefundPending)
+                    {
+                        <span class="badge text-bg-warning">Refund pending</span>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(order.OrderStatus))
+                    {
+                        <span class="badge text-bg-secondary">@order.OrderStatus</span>
+                    }
+                    else
+                    {
+                        <span class="text-muted">unknown</span>
+                    }
+                </td>
+                <td>
+                    <div class="d-flex gap-2">
+                        @if (order.Refundable && order.Paid && !order.Wired && !order.RefundPending)
+                        {
+                            <form method="post"
+                                  asp-action="RefundOrder"
+                                  asp-route-orderId="@order.OrderId"
+                                  asp-route-ordersPage="@Model.OrdersPage">
+                                <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
+                                <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
+                                <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
+                                <input type="hidden" name="ordersPage" value="@Model.OrdersPage" />
+                                <input type="hidden" name="refundAmount" value="@order.Amount" />
+                                <button type="submit" class="btn btn-sm btn-outline-warning">Refund</button>
+                            </form>
+                        }
+                        @if (order.PaymentFailed)
+                        {
+                            <form method="post"
+                                  asp-action="AbortOrder"
+                                  asp-route-orderId="@order.OrderId"
+                                  asp-route-ordersPage="@Model.OrdersPage"
+                                  onsubmit="return confirm('Abort this failed payment order?');">
+                                <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
+                                <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
+                                <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
+                                <input type="hidden" name="ordersPage" value="@Model.OrdersPage" />
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Abort</button>
+                            </form>
+                        }
+                        @if ((!order.Refundable || !order.Paid || order.Wired || order.RefundPending) && !order.PaymentFailed)
+                        {
+                            <span class="text-muted">No action</span>
+                        }
+                    </div>
+                </td>
+            </tr>
+            @if (string.Equals(Model.PendingRefundOrderId, order.OrderId, StringComparison.OrdinalIgnoreCase))
+            {
+                <tr>
+                    <td colspan="7">
+                        <div class="alert alert-warning d-flex align-items-center justify-content-between mb-0 py-2">
+                            <span>Confirm refund for order <code>@order.OrderId</code>?</span>
+                            <div class="d-flex gap-2">
+                                <form method="post"
+                                      asp-action="RefundOrder"
+                                      asp-route-orderId="@order.OrderId"
+                                      asp-route-ordersPage="@Model.OrdersPage"
+                                      class="mb-0">
+                                    <input type="hidden" name="confirmRefund" value="true" />
+                                    <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
+                                    <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
+                                    <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
+                                    <input type="hidden" name="refundAmount" value="@order.Amount" />
+                                    <button type="submit" class="btn btn-sm btn-danger">Proceed refund</button>
+                                </form>
+                                <form method="post"
+                                      asp-action="RefundOrder"
+                                      asp-route-orderId="@order.OrderId"
+                                      asp-route-ordersPage="@Model.OrdersPage"
+                                      class="mb-0">
+                                    <input type="hidden" name="cancelRefund" value="true" />
+                                    <button type="submit" class="btn btn-sm btn-secondary">Cancel</button>
+                                </form>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+            }
+            @if (string.Equals(Model.OrderActionOrderId, order.OrderId, StringComparison.OrdinalIgnoreCase) &&
+                 !string.IsNullOrWhiteSpace(Model.OrderActionMessage))
+            {
+                <tr>
+                    <td colspan="7">
+                        <div class="alert @(string.Equals(Model.OrderActionSeverity, "success", StringComparison.OrdinalIgnoreCase) ? "alert-success" : "alert-danger") mb-0 py-2">
+                            @Model.OrderActionMessage
+                        </div>
+                    </td>
+                </tr>
+            }
+        }
+    }
+    else
+    {
+        <tr>
+            <td colspan="7" class="text-muted">No orders found for this instance.</td>
+        </tr>
+    }
+    </tbody>
+</table>
+@if (Model.OrdersTotalCount > 0)
+{
+    <div class="d-flex align-items-center justify-content-between">
+        <div class="text-muted">
+            Showing page @Model.OrdersPage of @Model.OrdersTotalPages (@Model.OrdersTotalCount total orders)
+        </div>
+        <div class="btn-group">
+            <a class="btn btn-outline-secondary @(Model.OrdersPage <= 1 ? "disabled" : null)"
+               asp-action="GetServerConfig"
+               asp-route-ordersPage="@(Model.OrdersPage - 1)">
+                Previous
+            </a>
+            <a class="btn btn-outline-secondary @(Model.OrdersPage >= Model.OrdersTotalPages ? "disabled" : null)"
+               asp-action="GetServerConfig"
+               asp-route-ordersPage="@(Model.OrdersPage + 1)">
+                Next
+            </a>
+        </div>
+    </div>
+}
+
 @functions
 {
     private static string FormatTimeframe(long micros)

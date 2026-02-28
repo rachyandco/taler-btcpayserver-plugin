@@ -3,6 +3,7 @@
 // Output: strongly typed models rendered in Razor views and validated on submit.
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System;
 
 namespace BTCPayServer.Plugins.Taler.Controllers.ViewModels;
 
@@ -28,6 +29,16 @@ public class TalerServerConfigViewModel
     public List<TalerAssetViewModel> Assets { get; set; } = [];
     public List<TalerBankAccountViewModel> BankAccounts { get; set; } = [];
     public string? BankAccountsError { get; set; }
+    public List<TalerOrderViewModel> Orders { get; set; } = [];
+    public string? OrdersError { get; set; }
+    public int OrdersPage { get; set; } = 1;
+    public int OrdersPageSize { get; set; } = 20;
+    public int OrdersTotalCount { get; set; }
+    public int OrdersTotalPages { get; set; } = 1;
+    public string? PendingRefundOrderId { get; set; }
+    public string? OrderActionOrderId { get; set; }
+    public string? OrderActionMessage { get; set; }
+    public string? OrderActionSeverity { get; set; }
     public List<TalerKycEntryViewModel> KycEntries { get; set; } = [];
     public string? KycError { get; set; }
 }
@@ -47,6 +58,21 @@ public class TalerBankAccountViewModel
     public string PaytoUri { get; set; } = "";
     public string HWire { get; set; } = "";
     public bool Active { get; set; }
+}
+
+public class TalerOrderViewModel
+{
+    public string OrderId { get; set; } = "";
+    public bool Paid { get; set; }
+    public bool Refundable { get; set; }
+    public bool Wired { get; set; }
+    public bool RefundPending { get; set; }
+    public bool PaymentFailed { get; set; }
+    public string? OrderStatus { get; set; }
+    public string? Amount { get; set; }
+    public string? RefundAmount { get; set; }
+    public string? PendingRefundAmount { get; set; }
+    public DateTimeOffset? CreatedAt { get; set; }
 }
 
 public class TalerKycEntryViewModel

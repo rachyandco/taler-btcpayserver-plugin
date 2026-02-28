@@ -34,6 +34,18 @@ public record TalerKycEntry(
     IReadOnlyList<TalerKycLimit> Limits);
 
 public record TalerOrderStatus(string OrderId, string? TalerPayUri, bool Paid, decimal? Amount, string? Currency);
+public record TalerOrderSummary(
+    string OrderId,
+    bool Paid,
+    bool Refundable,
+    bool Wired,
+    bool RefundPending,
+    bool PaymentFailed,
+    string? OrderStatus,
+    string? Amount,
+    string? RefundAmount,
+    string? PendingRefundAmount,
+    DateTimeOffset? CreatedAt);
 public record TalerConfig(bool SelfProvisioning);
 public record TalerTokenResponse(string AccessToken);
 
@@ -537,6 +549,158 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
     }
 
     /// <summary>
+    /// Lists merchant orders from instance private API.
+    /// Inputs: backend URL, instance ID, API token.
+    /// Output: list of order summaries with paid/refundable/failed flags.
+    /// </summary>
+    public async Task<IReadOnlyList<TalerOrderSummary>> GetOrdersAsync(string baseUrl, string instanceId, string apiToken, CancellationToken cancellationToken)
+    {
+        // Use bounded latest-first window to avoid unbounded order scans that can destabilize some merchant builds.
+        var uri = BuildInstancePrivateUri(baseUrl, instanceId, "orders?delta=-200");
+        logger.LogDebug("Requesting Taler orders from {OrdersUri}", uri);
+        using var response = await SendOrdersRequestWithRetryAsync(uri, apiToken, cancellationToken);
+        await EnsureSuccessStatusCode(response, "list orders");
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (!json.RootElement.TryGetProperty("orders", out var ordersProp) || ordersProp.ValueKind != JsonValueKind.Array)
+            return Array.Empty<TalerOrderSummary>();
+
+        var result = new List<TalerOrderSummary>();
+        foreach (var order in ordersProp.EnumerateArray())
+        {
+            var orderId = order.TryGetProperty("order_id", out var orderIdProp) ? orderIdProp.GetString() : null;
+            if (string.IsNullOrWhiteSpace(orderId))
+                continue;
+
+            var orderStatus = order.TryGetProperty("order_status", out var orderStatusProp) ? orderStatusProp.GetString() : null;
+            var paid = ParseBooleanLike(order, "paid") ||
+                       string.Equals(orderStatus, "paid", StringComparison.OrdinalIgnoreCase);
+            var hasRefundableField = order.TryGetProperty("refundable", out _);
+            var refundable = ParseBooleanLike(order, "refundable");
+            var wired = ParseBooleanLike(order, "wired");
+            var refundAmount = order.TryGetProperty("refund_amount", out var refundAmountProp) && refundAmountProp.ValueKind == JsonValueKind.String
+                ? refundAmountProp.GetString()
+                : null;
+            var pendingRefundAmount = order.TryGetProperty("pending_refund_amount", out var pendingRefundAmountProp) &&
+                                      pendingRefundAmountProp.ValueKind == JsonValueKind.String
+                ? pendingRefundAmountProp.GetString()
+                : null;
+            var refundPending = !IsZeroAmount(pendingRefundAmount);
+            if (!hasRefundableField &&
+                !refundable &&
+                !string.IsNullOrWhiteSpace(refundAmount))
+            {
+                refundable = !IsZeroAmount(refundAmount);
+            }
+
+            var paymentFailed = string.Equals(orderStatus, "payment-failed", StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(orderStatus, "failed", StringComparison.OrdinalIgnoreCase);
+
+            var amount = GetOrderAmount(order);
+            var createdAt = GetOrderCreationTime(order);
+
+            result.Add(new TalerOrderSummary(
+                orderId!,
+                paid,
+                refundable,
+                wired,
+                refundPending,
+                paymentFailed,
+                orderStatus,
+                amount,
+                refundAmount,
+                pendingRefundAmount,
+                createdAt));
+        }
+
+        return result;
+    }
+
+    private async Task<HttpResponseMessage> SendOrdersRequestWithRetryAsync(Uri uri, string apiToken, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        HttpRequestException? lastException = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            AddAuthorization(request, apiToken);
+            if (attempt > 1)
+                request.Headers.ConnectionClose = true;
+
+            try
+            {
+                var response = await httpClient.SendAsync(request, cancellationToken);
+                if (attempt == 1)
+                {
+                    logger.LogDebug("Taler orders response status {StatusCode} from {OrdersUri}", (int)response.StatusCode, uri);
+                }
+                else
+                {
+                    logger.LogInformation(
+                        "Taler orders request recovered on attempt {Attempt}/{MaxAttempts} with status {StatusCode}",
+                        attempt,
+                        maxAttempts,
+                        (int)response.StatusCode);
+                }
+                return response;
+            }
+            catch (HttpRequestException ex) when (attempt < maxAttempts)
+            {
+                lastException = ex;
+                var delayMs = attempt * 400;
+                logger.LogDebug(
+                    "Orders request attempt {Attempt}/{MaxAttempts} failed for {OrdersUri}: {Error}. Retrying in {DelayMs}ms",
+                    attempt,
+                    maxAttempts,
+                    uri,
+                    ex.Message,
+                    delayMs);
+                await Task.Delay(delayMs, cancellationToken);
+            }
+        }
+
+        throw lastException ?? new HttpRequestException($"Orders request failed for {uri}");
+    }
+
+    /// <summary>
+    /// Requests a refund for one merchant order.
+    /// Inputs: backend URL, instance ID, API token, order ID, and refund amount.
+    /// Output: none; throws on non-success HTTP responses.
+    /// </summary>
+    public async Task RefundOrderAsync(string baseUrl, string instanceId, string apiToken, string orderId, string refundAmount, CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            refund = refundAmount,
+            reason = "Refund requested from BTCPay Taler settings"
+        });
+        var request = new HttpRequestMessage(HttpMethod.Post, BuildInstancePrivateUri(baseUrl, instanceId, $"orders/{orderId}/refund"))
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        AddAuthorization(request, apiToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessStatusCode(response, "refund order");
+    }
+
+    /// <summary>
+    /// Aborts one merchant order after failed payment.
+    /// Inputs: backend URL, instance ID, API token, and order ID.
+    /// Output: none; throws on non-success HTTP responses.
+    /// </summary>
+    public async Task AbortOrderAsync(string baseUrl, string instanceId, string apiToken, string orderId, CancellationToken cancellationToken)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, BuildInstancePrivateUri(baseUrl, instanceId, $"orders/{orderId}/abort"));
+        AddAuthorization(request, apiToken);
+
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessStatusCode(response, "abort order");
+    }
+
+    /// <summary>
     /// Builds absolute merchant URI from base + relative path.
     /// Inputs: base URL and relative endpoint string.
     /// Output: normalized absolute <see cref="Uri"/>.
@@ -667,6 +831,178 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             long.TryParse(element.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
             return parsed;
         return null;
+    }
+
+    /// <summary>
+    /// Parses a boolean-like JSON property.
+    /// Inputs: JSON object and property name.
+    /// Output: true for true/\"true\"/\"yes\"/1, otherwise false.
+    /// </summary>
+    private static bool ParseBooleanLike(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var prop))
+            return false;
+
+        return prop.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number => prop.TryGetInt32(out var i) && i != 0,
+            JsonValueKind.String => string.Equals(prop.GetString(), "true", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(prop.GetString(), "yes", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(prop.GetString(), "1", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Detects whether amount string is zero-like (CUR:0, CUR:0.0, etc).
+    /// Inputs: amount string.
+    /// Output: true when numeric part parses to 0.
+    /// </summary>
+    private static bool IsZeroAmount(string? amount)
+    {
+        if (string.IsNullOrWhiteSpace(amount) || !amount.Contains(':'))
+            return false;
+
+        var parts = amount.Split(':', 2);
+        return decimal.TryParse(parts[1], NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var parsed) &&
+               parsed == 0m;
+    }
+
+    /// <summary>
+    /// Extracts order amount from common merchant payload shapes.
+    /// Inputs: one order JSON object.
+    /// Output: normalized amount string (e.g. CUR:12.34) when available.
+    /// </summary>
+    private static string? GetOrderAmount(JsonElement order)
+    {
+        if (TryGetStringProperty(order, "amount", out var amount))
+            return amount;
+        if (TryGetStringProperty(order, "total_amount", out amount))
+            return amount;
+
+        if (order.TryGetProperty("order", out var innerOrder) &&
+            innerOrder.ValueKind == JsonValueKind.Object &&
+            TryGetStringProperty(innerOrder, "amount", out amount))
+            return amount;
+
+        if (order.TryGetProperty("contract_terms", out var contractTerms) &&
+            contractTerms.ValueKind == JsonValueKind.Object &&
+            TryGetStringProperty(contractTerms, "amount", out amount))
+            return amount;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Extracts order creation time from common merchant payload shapes.
+    /// Inputs: one order JSON object.
+    /// Output: timestamp when available.
+    /// </summary>
+    private static DateTimeOffset? GetOrderCreationTime(JsonElement order)
+    {
+        if (TryGetTimeProperty(order, "timestamp", out var ts))
+            return ts;
+        if (TryGetTimeProperty(order, "creation_time", out ts))
+            return ts;
+        if (TryGetTimeProperty(order, "created_at", out ts))
+            return ts;
+
+        if (order.TryGetProperty("order", out var innerOrder) &&
+            innerOrder.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetTimeProperty(innerOrder, "timestamp", out ts))
+                return ts;
+            if (TryGetTimeProperty(innerOrder, "creation_time", out ts))
+                return ts;
+        }
+
+        if (order.TryGetProperty("contract_terms", out var contractTerms) &&
+            contractTerms.ValueKind == JsonValueKind.Object)
+        {
+            if (TryGetTimeProperty(contractTerms, "timestamp", out ts))
+                return ts;
+            if (TryGetTimeProperty(contractTerms, "creation_time", out ts))
+                return ts;
+        }
+
+        return null;
+    }
+
+    private static bool TryGetStringProperty(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out var prop) || prop.ValueKind != JsonValueKind.String)
+            return false;
+
+        var raw = prop.GetString();
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        value = raw;
+        return true;
+    }
+
+    private static bool TryGetTimeProperty(JsonElement element, string propertyName, out DateTimeOffset? value)
+    {
+        value = null;
+        if (!element.TryGetProperty(propertyName, out var prop))
+            return false;
+
+        value = ParseTimeValue(prop);
+        return value is not null;
+    }
+
+    /// <summary>
+    /// Parses timestamps from Taler objects ({t_s}) or ISO/unix scalar values.
+    /// Inputs: JSON timestamp token.
+    /// Output: UTC timestamp when parseable.
+    /// </summary>
+    private static DateTimeOffset? ParseTimeValue(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("t_s", out var tsSeconds))
+                return ParseUnixSeconds(tsSeconds);
+            if (element.TryGetProperty("t_ms", out var tsMillis))
+                return ParseUnixMilliseconds(tsMillis);
+            return null;
+        }
+
+        if (element.ValueKind == JsonValueKind.Number)
+            return ParseUnixSeconds(element);
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var raw = element.GetString();
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+                return parsed.ToUniversalTime();
+
+            if (long.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+                return DateTimeOffset.FromUnixTimeSeconds(numeric);
+        }
+
+        return null;
+    }
+
+    private static DateTimeOffset? ParseUnixSeconds(JsonElement element)
+    {
+        var seconds = ParseLong(element);
+        if (seconds is null || seconds <= 0)
+            return null;
+        return DateTimeOffset.FromUnixTimeSeconds(seconds.Value);
+    }
+
+    private static DateTimeOffset? ParseUnixMilliseconds(JsonElement element)
+    {
+        var millis = ParseLong(element);
+        if (millis is null || millis <= 0)
+            return null;
+        return DateTimeOffset.FromUnixTimeMilliseconds(millis.Value);
     }
 
     /// <summary>
