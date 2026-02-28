@@ -8,15 +8,16 @@ GNU Taler is in active development and upstream protocol/API behavior may change
 This plugin can break between BTCPay or Taler upgrades and should be deployed with caution in production.
 
 ## Quick production checklist
-1. Copy plugin into BTCPay and install the generated `.btcpay` package.
-2. Deploy `taler-merchant` + `taler-merchant-db` using the provided BTCPay docker fragment.
-3. Ensure merchant template contains `BASE_URL = "${TALER_MERCHANT_BASE_URL}"`.
-4. Set `/root/BTCPayServer/.env`: `TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/`.
-5. Ensure fragment passes `TALER_MERCHANT_BASE_URL` into `taler-merchant` container environment.
-6. Update nginx policies to block public access to taler merchant 
-7. In `Server settings -> Taler`: set internal `Merchant base URL` and public `Merchant public base URL`.
-8. Initialize instance, generate API token, add bank account, fetch/enable assets, then restart BTCPay.
-9. Create a fresh invoice and verify QR/Pay link uses valid `taler://pay/...` URI and payment is detected.
+1. Copy nginx vhost rules in `/var/lib/docker/volumes/generated_nginx_vhost/_data/<your-host>`
+2. Copy `docker-fragments/opt-add-taler-merchant.custom.yml` in `docker-compose-generator/docker-fragments/opt-add-taler-merchant.custom.yml`
+3. Run `export BTCPAYGEN_ADDITIONAL_FRAGMENTS="$BTCPAYGEN_ADDITIONAL_FRAGMENTS;opt-add-taler-merchant.custom"`
+4. Run `export TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/`
+5. Run `. ./btcpay-setup.sh -i`
+6. In `Server settings -> Taler`: set public `Merchant public base URL` to `https://<your-host>/taler-merchant/`
+7. Initialize instance, generate API token, then `Save` then restart BTCPay.
+8. Fetch/enable assets and add a bank account
+9. Follow the wire and KYC instructions to enable the bank account
+
 
 ## Add a bank account
 
@@ -29,15 +30,6 @@ In order to receive CHF from `taler-ops.ch` you will have to have your iban adde
 If the bank account status is `kyc-wire-required` you will need to send from the same bank account the smallest amount possible to the payto instructions. It might take 1 or 2 days to complete.
 
 Once the bank account is on status `kyc-required` you will be requested to validate the Terms of Services of the Taler exchange.
-
-
-## Features
-- Server-level Taler settings UI
-- Store-level enable/disable per Taler asset
-- Auto-discovery of assets from merchant `/config`
-- Merchant instance self-provisioning from UI (init instance, token generation, bank account checks/add)
-- Invoice checkout integration with Taler QR and wallet link
-- Background payment listener to settle BTCPay invoices when merchant reports paid orders
 
 ## Repository layout
 - Plugin code: `BTCPayServer.Plugins.Taler/`
@@ -71,39 +63,6 @@ Then:
 - `Check bank accounts`
 - `Fetch assets`
 - Save and restart BTCPay when asset set changes
-
-## Merchant backend deployment with btcpayserver-docker
-Copy files into your btcpayserver-docker checkout:
-- `docker-fragments/opt-add-taler-merchant.custom.yml` -> `docker-compose-generator/docker-fragments/opt-add-taler-merchant.custom.yml`
-- `docker/taler-merchant/` -> `docker-taler-merchant/`
-
-Enable fragment in `/root/BTCPayServer/.env`:
-```bash
-BTCPAYGEN_ADDITIONAL_FRAGMENTS=...;opt-add-taler-merchant.custom
-```
-
-Set merchant base URL env (used by merchant config template):
-```bash
-TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/
-```
-
-Important:
-- The fragment must pass `TALER_MERCHANT_BASE_URL` into `taler-merchant` service environment.
-- `docker-taler-merchant/merchant.conf` should include:
-```ini
-BASE_URL = "${TALER_MERCHANT_BASE_URL}"
-```
-
-Regenerate/redeploy:
-```bash
-. ./btcpay-setup.sh -i
-docker compose -f Generated/docker-compose.generated.yml up -d --build --force-recreate taler-merchant taler-merchant-db
-```
-
-Verify loaded value:
-```bash
-docker exec -it generated-taler-merchant-1 taler-merchant-config -s merchant -o BASE_URL -f
-```
 
 ## Nginx reverse proxy (public merchant path)
 Expose merchant public endpoints through BTCPay nginx at `/taler-merchant/` over HTTPS.
@@ -153,11 +112,6 @@ For backend `20:0:8`, these are the relevant endpoints this plugin/deployment us
 Canonical upstream reference:
 - https://docs.taler.net/core/api-merchant.html
 
-## Common issues
-- `instance not found` (`code: 2000`): initialize instance first.
-- `no active bank account` (`code: 2500`): add bank account to the instance.
-- `legal limits` (`code: 2513`): exchange/KYC constraint, not a BTCPay plugin bug.
-- Asset list empty until restart: restart BTCPay after changing enabled assets.
 
 ## Some CLI commands
 
