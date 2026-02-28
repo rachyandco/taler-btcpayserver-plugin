@@ -388,7 +388,7 @@
                     @(order.Refundable ? "Yes" : "No")
                 </td>
                 <td>
-                    @if (order.RefundPending)
+                    @if (order.Paid && order.RefundPending)
                     {
                         <span class="badge text-bg-warning">Refund pending</span>
                     }

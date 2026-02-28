@@ -586,7 +586,7 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                                       pendingRefundAmountProp.ValueKind == JsonValueKind.String
                 ? pendingRefundAmountProp.GetString()
                 : null;
-            var refundPending = !IsZeroAmount(pendingRefundAmount);
+            var refundPending = !string.IsNullOrWhiteSpace(pendingRefundAmount) && !IsZeroAmount(pendingRefundAmount);
             if (!hasRefundableField &&
                 !refundable &&
                 !string.IsNullOrWhiteSpace(refundAmount))
