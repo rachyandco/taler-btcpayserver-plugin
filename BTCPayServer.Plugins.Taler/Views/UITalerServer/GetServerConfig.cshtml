@@ -247,7 +247,30 @@
                     {
                         foreach (var instruction in entry.PaytoKycAuths)
                         {
-                            <div><code>@instruction</code></div>
+                            if (TryParseSwissQrBillInstruction(instruction, out var swissQr))
+                            {
+                                <div class="border rounded p-2 mb-2">
+                                    <div><strong>Swiss QR bill payment instruction</strong></div>
+                                    <div>IBAN: <code>@swissQr!.Iban</code></div>
+                                    @if (!string.IsNullOrWhiteSpace(swissQr.ReceiverName))
+                                    {
+                                        <div>Recipient: @swissQr.ReceiverName</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(swissQr.ReceiverPostalCode) || !string.IsNullOrWhiteSpace(swissQr.ReceiverTown))
+                                    {
+                                        <div>City: @swissQr.ReceiverPostalCode @swissQr.ReceiverTown</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(swissQr.Message))
+                                    {
+                                        <div>Reference: <code>@swissQr.Message</code></div>
+                                    }
+                                    <div class="text-muted small mt-1">Raw link: <code>@instruction</code></div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div><code>@instruction</code></div>
+                            }
                         }
                     }
                     else
@@ -568,4 +591,71 @@
         var baseUrl = exchangeUrl.TrimEnd('/');
         return $"{baseUrl}/kyc-spa/{Uri.EscapeDataString(accessToken)}";
     }
+
+    private static bool TryParseSwissQrBillInstruction(string instruction, out SwissQrBillInstruction? parsed)
+    {
+        parsed = null;
+        if (string.IsNullOrWhiteSpace(instruction) ||
+            !instruction.StartsWith("payto://", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var withoutScheme = instruction["payto://".Length..];
+        var queryIndex = withoutScheme.IndexOf('?', StringComparison.Ordinal);
+        var pathPart = queryIndex >= 0 ? withoutScheme[..queryIndex] : withoutScheme;
+        var queryPart = queryIndex >= 0 ? withoutScheme[(queryIndex + 1)..] : string.Empty;
+
+        var pathSegments = pathPart.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (pathSegments.Length < 2 ||
+            !string.Equals(pathSegments[0], "iban", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var iban = DecodeFormComponent(pathSegments[1]);
+        var query = ParseFormQuery(queryPart);
+
+        query.TryGetValue("receiver-name", out var receiverName);
+        query.TryGetValue("receiver-postal-code", out var receiverPostalCode);
+        query.TryGetValue("receiver-town", out var receiverTown);
+        query.TryGetValue("message", out var message);
+
+        parsed = new SwissQrBillInstruction(
+            iban,
+            receiverName,
+            receiverPostalCode,
+            receiverTown,
+            message);
+        return true;
+    }
+
+    private static Dictionary<string, string> ParseFormQuery(string query)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query))
+            return result;
+
+        var pairs = query.Split('&', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var pair in pairs)
+        {
+            var equalsIndex = pair.IndexOf('=', StringComparison.Ordinal);
+            var key = equalsIndex >= 0 ? pair[..equalsIndex] : pair;
+            var value = equalsIndex >= 0 ? pair[(equalsIndex + 1)..] : string.Empty;
+            key = DecodeFormComponent(key);
+            value = DecodeFormComponent(value);
+            if (!string.IsNullOrWhiteSpace(key))
+                result[key] = value;
+        }
+
+        return result;
+    }
+
+    private static string DecodeFormComponent(string value)
+    {
+        return Uri.UnescapeDataString(value.Replace("+", " ", StringComparison.Ordinal));
+    }
+
+    private sealed record SwissQrBillInstruction(
+        string Iban,
+        string? ReceiverName,
+        string? ReceiverPostalCode,
+        string? ReceiverTown,
+        string? Message);
 }
