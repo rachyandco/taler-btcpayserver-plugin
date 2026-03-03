@@ -75,7 +75,18 @@ public class TalerPaymentListener(
             {
                 foreach (var asset in talerPluginConfiguration.AssetConfigurationItems.Values)
                 {
-                    await CheckPaymentsForAsset(asset, token);
+                    try
+                    {
+                        await CheckPaymentsForAsset(asset, token);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Error while checking Taler payments for asset {AssetCode}", asset.AssetCode);
+                    }
                 }
                 await Task.Delay(TimeSpan.FromSeconds(15), token);
             }
@@ -101,7 +112,18 @@ public class TalerPaymentListener(
     {
         var pmi = asset.GetPaymentMethodId();
         var handler = (TalerPaymentMethodHandler)handlers[pmi];
-        var invoices = (await invoiceRepository.GetMonitoredInvoices(pmi, true, cancellationToken: token))
+        InvoiceEntity[] monitoredInvoices;
+        try
+        {
+            monitoredInvoices = await invoiceRepository.GetMonitoredInvoices(pmi, cancellationToken: token);
+        }
+        catch (Exception ex) when (IsTransientTimeout(ex, token))
+        {
+            logger.LogWarning(ex, "Timed out loading monitored invoices for {PaymentMethodId}; skipping this polling cycle", pmi);
+            return;
+        }
+
+        var invoices = monitoredInvoices
             .Where(i => StatusToTrack.Contains(i.Status))
             .Where(i => i.GetPaymentPrompt(pmi)?.Activated is true)
             .ToArray();
@@ -161,5 +183,19 @@ public class TalerPaymentListener(
                 logger.LogWarning(ex, "Failed to check Taler order {OrderId}", details.OrderId);
             }
         }
+    }
+
+    private static bool IsTransientTimeout(Exception exception, CancellationToken token)
+    {
+        if (token.IsCancellationRequested || exception is OperationCanceledException)
+            return false;
+
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is TimeoutException)
+                return true;
+        }
+
+        return false;
     }
 }
