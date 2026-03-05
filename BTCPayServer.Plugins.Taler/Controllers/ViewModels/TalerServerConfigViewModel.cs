@@ -23,9 +23,6 @@ public class TalerServerConfigViewModel
 
     [Display(Name = "Merchant API token")]
     public string? ApiToken { get; set; }
-    public string? InstancePasswordActual { get; set; }
-    public string? ApiTokenActual { get; set; }
-
     public List<TalerAssetViewModel> Assets { get; set; } = [];
     public List<TalerBankAccountViewModel> BankAccounts { get; set; } = [];
     public string? BankAccountsError { get; set; }
