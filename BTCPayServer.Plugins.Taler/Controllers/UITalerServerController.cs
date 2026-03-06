@@ -712,10 +712,8 @@ public class UITalerServerController(
             MerchantBaseUrl = settings.MerchantBaseUrl,
             MerchantPublicBaseUrl = settings.MerchantPublicBaseUrl,
             MerchantInstanceId = settings.MerchantInstanceId,
-            InstancePassword = settings.InstancePassword,
-            InstancePasswordActual = settings.InstancePassword,
-            ApiToken = settings.ApiToken,
-            ApiTokenActual = settings.ApiToken,
+            InstancePassword = string.IsNullOrWhiteSpace(settings.InstancePassword) ? null : SecretMask,
+            ApiToken = string.IsNullOrWhiteSpace(settings.ApiToken) ? null : SecretMask,
             Assets = settings.Assets.Select(Map).OrderBy(a => a.AssetCode, StringComparer.OrdinalIgnoreCase).ToList()
         };
     }

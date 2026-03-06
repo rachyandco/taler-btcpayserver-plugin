@@ -166,7 +166,6 @@
                     <form method="post" asp-action="DeleteBankAccount" asp-route-hWire="@account.HWire">
                         <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
                         <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
-                        <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
                         <button type="submit" class="btn btn-link p-0">Delete</button>
                     </form>
                 </td>
@@ -336,7 +335,6 @@
 <form method="post" asp-action="AddBankAccount">
     <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
     <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
-    <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
     <div class="row g-3">
         <div class="col-md-8">
             <label class="form-label" for="NewPaytoUri">Payto URI</label>
@@ -434,7 +432,6 @@
                                   asp-route-ordersPage="@Model.OrdersPage">
                                 <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
                                 <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
-                                <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
                                 <input type="hidden" name="ordersPage" value="@Model.OrdersPage" />
                                 <input type="hidden" name="refundAmount" value="@order.Amount" />
                                 <button type="submit" class="btn btn-sm btn-outline-warning">Refund</button>
@@ -449,7 +446,6 @@
                                   onsubmit="return confirm('Abort this failed payment order?');">
                                 <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
                                 <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
-                                <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
                                 <input type="hidden" name="ordersPage" value="@Model.OrdersPage" />
                                 <button type="submit" class="btn btn-sm btn-outline-danger">Abort</button>
                             </form>
@@ -476,7 +472,6 @@
                                     <input type="hidden" name="confirmRefund" value="true" />
                                     <input type="hidden" name="MerchantBaseUrl" value="@Model.MerchantBaseUrl" />
                                     <input type="hidden" name="MerchantInstanceId" value="@Model.MerchantInstanceId" />
-                                    <input type="hidden" name="ApiToken" value="@Model.ApiToken" />
                                     <input type="hidden" name="refundAmount" value="@order.Amount" />
                                     <button type="submit" class="btn btn-sm btn-danger">Proceed refund</button>
                                 </form>
