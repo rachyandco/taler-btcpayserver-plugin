@@ -6,7 +6,7 @@ var plugin = solutionFolder.Single(e => Path.GetFileName(e) == "BTCPayServer.Plu
 var assemblyConfigurationAttribute = typeof(Program).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>();
 var buildConfigurationName = assemblyConfigurationAttribute?.Configuration;
 
-string path = $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net8.0/{Path.GetFileName(plugin)}.dll;";
+string path = $"{Path.GetFullPath(plugin)}/bin/{buildConfigurationName}/net10.0/{Path.GetFileName(plugin)}.dll;";
 
 var content = JsonSerializer.Serialize(new
 {

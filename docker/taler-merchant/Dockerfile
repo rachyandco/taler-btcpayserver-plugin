@@ -1,8 +1,8 @@
 FROM debian:trixie-slim
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG DEBIAN_CODENAME=trixie
-ARG TALER_MERCHANT_VERSION=v1.4.9
+ARG DEBIAN_CODENAME=trixie-testing
+ARG TALER_MERCHANT_VERSION=v1.5.8
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl gnupg gettext-base \

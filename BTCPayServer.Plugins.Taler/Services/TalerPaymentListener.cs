@@ -88,7 +88,7 @@ public class TalerPaymentListener(
                         logger.LogError(ex, "Error while checking Taler payments for asset {AssetCode}", asset.AssetCode);
                     }
                 }
-                await Task.Delay(TimeSpan.FromSeconds(15), token);
+                await Task.Delay(TimeSpan.FromSeconds(15.0), token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -98,7 +98,7 @@ public class TalerPaymentListener(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error while checking Taler payments");
-                await Task.Delay(TimeSpan.FromSeconds(15), token);
+                await Task.Delay(TimeSpan.FromSeconds(15.0), token);
             }
         }
     }
@@ -177,6 +177,24 @@ public class TalerPaymentListener(
                 var payment = await paymentService.AddPayment(paymentData, [details.OrderId]);
                 if (payment != null)
                     eventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
+            }
+            catch (TalerOrderNotFoundException)
+            {
+                var promptToDeactivate = invoice.GetPaymentPrompt(pmi);
+                if (promptToDeactivate is not null && promptToDeactivate.Activated)
+                {
+                    promptToDeactivate.Inactive = true;
+                    await invoiceRepository.UpdatePrompt(invoice.Id, promptToDeactivate);
+                    eventAggregator.Publish(new InvoiceNeedUpdateEvent(invoice.Id));
+                    logger.LogInformation(
+                        "Deactivated stale Taler prompt for invoice {InvoiceId} and order {OrderId} because merchant reports unknown proposal",
+                        invoice.Id,
+                        details.OrderId);
+                }
+                else
+                {
+                    logger.LogDebug("Skipping unknown Taler order {OrderId}", details.OrderId);
+                }
             }
             catch (Exception ex)
             {

@@ -2,10 +2,13 @@
 **/bin/
 **/obj/
 **/TestResults/
+**/artifacts/
+
 
 # IDE / editor files
 .vs/
 .vscode/
+.dotnet-home/
 *.user
 *.suo
 *.swp

@@ -9,6 +9,9 @@ namespace BTCPayServer.Plugins.Taler.Controllers.ViewModels;
 
 public class TalerServerConfigViewModel
 {
+    public string? MerchantVersion { get; set; }
+    public string? NewlyGeneratedToken { get; set; }
+
     [Display(Name = "Merchant base URL")]
     public string? MerchantBaseUrl { get; set; }
 
@@ -21,8 +24,6 @@ public class TalerServerConfigViewModel
     [Display(Name = "Instance password")]
     public string? InstancePassword { get; set; }
 
-    [Display(Name = "Merchant API token")]
-    public string? ApiToken { get; set; }
     public List<TalerAssetViewModel> Assets { get; set; } = [];
     public List<TalerBankAccountViewModel> BankAccounts { get; set; } = [];
     public string? BankAccountsError { get; set; }
@@ -70,6 +71,7 @@ public class TalerOrderViewModel
     public string? RefundAmount { get; set; }
     public string? PendingRefundAmount { get; set; }
     public DateTimeOffset? CreatedAt { get; set; }
+    public string? OrderStatusUrl { get; set; }
 }
 
 public class TalerKycEntryViewModel

@@ -6,7 +6,34 @@
     ViewData["Title"] = "Taler";
 }
 
-<h2 class="mb-4">Taler settings</h2>
+<div class="d-flex align-items-center gap-3 mb-4">
+    <h2 class="mb-0">Taler settings</h2>
+    @if (!string.IsNullOrWhiteSpace(Model.MerchantVersion))
+    {
+        <span class="badge text-bg-secondary">Merchant v@(Model.MerchantVersion)</span>
+    }
+</div>
+
+@if (!string.IsNullOrWhiteSpace(Model.NewlyGeneratedToken))
+{
+    <div class="alert alert-warning alert-dismissible" role="alert">
+        <h5 class="alert-heading">Copy your API token now</h5>
+        <p class="mb-2">This token will not be shown again.</p>
+        <div class="input-group">
+            <input id="newly-generated-token"
+                   type="text"
+                   class="form-control font-monospace"
+                   value="@Model.NewlyGeneratedToken"
+                   readonly />
+            <button class="btn btn-outline-secondary only-for-js"
+                    type="button"
+                    data-clipboard-target="#newly-generated-token">
+                Copy
+            </button>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
 
 <form method="post" asp-action="GetServerConfig">
     <div class="form-group mb-3">
@@ -41,25 +68,6 @@
         </div>
         <div class="form-text">Password used to initialize and manage the instance.</div>
     </div>
-    <div class="form-group mb-4">
-        <label asp-for="ApiToken" class="form-label"></label>
-        <div class="input-group">
-            <input asp-for="ApiToken"
-                   class="form-control"
-                   type="password"
-                   autocomplete="off"
-                   value="@Model.ApiToken" />
-            <button class="btn btn-outline-secondary px-3 only-for-js" type="button"
-                    title="Show or hide value"
-                    aria-label="Show or hide API token"
-                    data-toggle-password="#ApiToken">
-                <span aria-hidden="true">&#128065;</span>
-            </button>
-        </div>
-        <div class="form-text">Provide the merchant API token (secret-token:...)
-            for private APIs. For full self-provisioning from this UI, the token must include account-management permissions.</div>
-    </div>
-
     <div class="d-flex gap-2 mb-4">
         <button type="submit" class="btn btn-outline-primary" formaction="@Url.Action("InitInstance")" formmethod="post">Initialize instance</button>
         <button type="submit" class="btn btn-outline-secondary" formaction="@Url.Action("GenerateToken")" formmethod="post">Generate API token</button>
@@ -379,7 +387,21 @@
         foreach (var order in Model.Orders)
         {
             <tr>
-                <td><code>@order.OrderId</code></td>
+                <td>
+                    <code>@order.OrderId</code>
+                    @if (!string.IsNullOrWhiteSpace(order.OrderStatusUrl))
+                    {
+                        <div class="d-flex align-items-center gap-1 mt-1">
+                            <a href="@order.OrderStatusUrl" target="_blank" rel="noopener noreferrer" class="small text-truncate" style="max-width:220px">@order.OrderStatusUrl</a>
+                            <button type="button"
+                                    class="btn btn-sm btn-link p-0 only-for-js"
+                                    title="Copy order status URL"
+                                    data-clipboard-text="@order.OrderStatusUrl">
+                                <span aria-hidden="true">&#128203;</span>
+                            </button>
+                        </div>
+                    }
+                </td>
                 <td>
                     @if (!string.IsNullOrWhiteSpace(order.Amount))
                     {

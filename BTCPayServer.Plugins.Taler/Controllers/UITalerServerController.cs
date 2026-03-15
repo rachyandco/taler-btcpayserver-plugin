@@ -30,6 +30,7 @@ public class UITalerServerController(
     ILogger<UITalerServerController> logger) : Controller
 {
     private const string SecretMask = "***";
+    private const string NewlyGeneratedTokenKey = "Taler_NewlyGeneratedToken";
     private const string PendingRefundOrderIdKey = "Taler_PendingRefundOrderId";
     private const string OrderActionOrderIdKey = "Taler_OrderActionOrderId";
     private const string OrderActionMessageKey = "Taler_OrderActionMessage";
@@ -51,6 +52,20 @@ public class UITalerServerController(
         var vm = Map(settings);
         vm.OrdersPage = Math.Max(1, ordersPage);
         PopulateOrderUiState(vm);
+        if (TempData.TryGetValue(NewlyGeneratedTokenKey, out var newToken))
+            vm.NewlyGeneratedToken = newToken?.ToString();
+        if (!string.IsNullOrWhiteSpace(settings.MerchantBaseUrl))
+        {
+            try
+            {
+                var config = await talerMerchantClient.GetConfigAsync(settings.MerchantBaseUrl, HttpContext.RequestAborted);
+                vm.MerchantVersion = config.Version;
+            }
+            catch
+            {
+                // version is best-effort; don't break the page if merchant is unreachable
+            }
+        }
         await PopulateBankAccounts(vm, settings.MerchantBaseUrl, settings.MerchantInstanceId, settings.ApiToken);
         return View(vm);
     }
@@ -72,7 +87,6 @@ public class UITalerServerController(
         settings.MerchantPublicBaseUrl = string.IsNullOrWhiteSpace(viewModel.MerchantPublicBaseUrl) ? null : viewModel.MerchantPublicBaseUrl.Trim();
         settings.MerchantInstanceId = string.IsNullOrWhiteSpace(viewModel.MerchantInstanceId) ? null : viewModel.MerchantInstanceId.Trim();
         settings.InstancePassword = UpdateSecret(settings.InstancePassword, viewModel.InstancePassword);
-        settings.ApiToken = UpdateSecret(settings.ApiToken, viewModel.ApiToken);
         settings.Assets = viewModel.Assets.Select(Map).ToList();
 
         await settingsRepository.UpdateSetting(settings, TalerPlugin.ServerSettingsKey);
@@ -268,6 +282,7 @@ public class UITalerServerController(
             settings.ApiToken = token.AccessToken;
             await settingsRepository.UpdateSetting(settings, TalerPlugin.ServerSettingsKey);
 
+            TempData[NewlyGeneratedTokenKey] = token.AccessToken;
             TempData.SetStatusMessageModel(new StatusMessageModel
             {
                 Message = "API token generated and saved (scope: all).",
@@ -713,7 +728,6 @@ public class UITalerServerController(
             MerchantPublicBaseUrl = settings.MerchantPublicBaseUrl,
             MerchantInstanceId = settings.MerchantInstanceId,
             InstancePassword = string.IsNullOrWhiteSpace(settings.InstancePassword) ? null : SecretMask,
-            ApiToken = string.IsNullOrWhiteSpace(settings.ApiToken) ? null : SecretMask,
             Assets = settings.Assets.Select(Map).OrderBy(a => a.AssetCode, StringComparer.OrdinalIgnoreCase).ToList()
         };
     }
@@ -729,7 +743,7 @@ public class UITalerServerController(
         var instanceId = string.IsNullOrWhiteSpace(form?.MerchantInstanceId)
             ? (string.IsNullOrWhiteSpace(settings.MerchantInstanceId) ? "default" : settings.MerchantInstanceId)
             : form!.MerchantInstanceId.Trim();
-        var apiToken = NormalizeSecretInput(form?.ApiToken, settings.ApiToken);
+        var apiToken = settings.ApiToken;
         return (baseUrl, instanceId, apiToken);
     }
 
@@ -834,7 +848,8 @@ public class UITalerServerController(
                     Amount = o.Amount,
                     RefundAmount = o.RefundAmount,
                     PendingRefundAmount = o.PendingRefundAmount,
-                    CreatedAt = o.CreatedAt
+                    CreatedAt = o.CreatedAt,
+                    OrderStatusUrl = o.OrderStatusUrl
                 })
                 .ToList();
 
@@ -850,14 +865,31 @@ public class UITalerServerController(
                 .Skip((vm.OrdersPage - 1) * vm.OrdersPageSize)
                 .Take(vm.OrdersPageSize)
                 .ToList();
+
+            // Enrich current page with order_status_url from individual endpoint for orders that didn't have it in the list.
+            var enrichTasks = vm.Orders
+                .Where(o => string.IsNullOrWhiteSpace(o.OrderStatusUrl))
+                .Select(async o =>
+                {
+                    try
+                    {
+                        o.OrderStatusUrl = await talerMerchantClient.GetOrderStatusUrlAsync(
+                            baseUrl, instanceId, apiToken, o.OrderId, HttpContext.RequestAborted);
+                    }
+                    catch
+                    {
+                        // best-effort; leave null
+                    }
+                });
+            await Task.WhenAll(enrichTasks);
         }
         catch (Exception ex)
         {
-            logger.LogError(
-                ex,
-                "Failed loading Taler orders for settings page. BaseUrl={BaseUrl} InstanceId={InstanceId}",
+            logger.LogWarning(
+                "Failed loading Taler orders for settings page. BaseUrl={BaseUrl} InstanceId={InstanceId}: {Error}",
                 baseUrl,
-                instanceId);
+                instanceId,
+                ex.Message);
             vm.OrdersError = ex.Message;
             vm.OrdersTotalCount = 0;
             vm.OrdersTotalPages = 1;

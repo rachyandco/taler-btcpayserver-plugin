@@ -46,10 +46,9 @@ public class TalerPlugin : BaseBTCPayServerPlugin
     /// </summary>
     private static void RegisterServices(IServiceCollection services)
     {
-        var settingsRepository = services.BuildServiceProvider().GetService<ISettingsRepository>() ??
-                                 throw new InvalidOperationException("serviceProvider.GetService<ISettingsRepository>()");
-
-        var serverSettings = settingsRepository.GetSettingAsync<TalerServerSettings>(ServerSettingsKey).Result ?? new TalerServerSettings();
+        using var sp = services.BuildServiceProvider();
+        var settingsRepository = sp.GetRequiredService<ISettingsRepository>();
+        var serverSettings = settingsRepository.GetSettingAsync<TalerServerSettings>(ServerSettingsKey).GetAwaiter().GetResult() ?? new TalerServerSettings();
         var assets = serverSettings.Assets.Where(a => a.Enabled).ToArray();
 
         var configuration = new TalerPluginConfiguration

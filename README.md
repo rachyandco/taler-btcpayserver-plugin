@@ -14,9 +14,10 @@ This plugin can break between BTCPay or Taler upgrades and should be deployed wi
 4. Run `export TALER_MERCHANT_BASE_URL=https://<your-host>/taler-merchant/`
 5. Run `. ./btcpay-setup.sh -i`
 6. In `Server settings -> Taler`: set public `Merchant public base URL` to `https://<your-host>/taler-merchant/`
-7. Initialize instance, generate API token, then `Save` then restart BTCPay.
+7. Initialize instance, generate API token (make sure to save it), then `Save` then restart BTCPay.
 8. Fetch/enable assets and add a bank account
 9. Follow the wire and KYC instructions to enable the bank account
+10. Add rates
 
 
 ## Add a bank account
@@ -39,7 +40,7 @@ Once the bank account is on status `kyc-required` you will be requested to valid
 
 ## Build plugin
 Prereqs:
-- .NET 8 SDK
+- .NET 10 SDK
 - BTCPay source available at `submodules/btcpayserver`
 
 Build:
@@ -84,6 +85,15 @@ location ~ ^/taler-merchant/(private|webui|management|instances/[^/]+/private)/ 
 
 add this in `/var/lib/docker/volumes/generated_nginx_vhost/_data/<your-host>`
 
+## Rates
+
+add these custom rates:
+
+```
+KUDOS_CHF = 0.01;
+CHF_KUDOS = 100;
+BTC_KUDOS = BTC_CHF * CHF_KUDOS;
+``` 
 
 ## API/token notes
 - Merchant private API calls use `Authorization: Bearer secret-token:...`
@@ -150,6 +160,24 @@ docker run --rm --network generated_default curlimages/curl:8.12.1 -sS \
     "http://taler-merchant:9966/instances/default/private/orders?paid=yes&wired=yes&delta=-50"
 ```
 
+## Changelog
+
+
+### v0.0.1.1
+
+- upgrade to .net 10
+- improve API token one time view
+- show `order_status_url` for each order in the list of orders
+- show the version of the merchant protocol
+- update merchant backend to 1.5.8, protocol v27:0:15 (there is a known but in case of multiple currencies available)
+
+### v0.0.1.0
+
+- initial plugin
 
 ## License
 GPLv3. See `LICENSE`.
+
+
+
+secret-token:HNCXD6RXP2P40M1F40Y6TCF7V9228NM44WWPH04JNXQP5JV7WMJ0

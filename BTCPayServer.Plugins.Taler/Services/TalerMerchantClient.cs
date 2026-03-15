@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -45,9 +46,18 @@ public record TalerOrderSummary(
     string? Amount,
     string? RefundAmount,
     string? PendingRefundAmount,
-    DateTimeOffset? CreatedAt);
-public record TalerConfig(bool SelfProvisioning);
+    DateTimeOffset? CreatedAt,
+    string? OrderStatusUrl = null);
+public record TalerConfig(bool SelfProvisioning, string? Version);
 public record TalerTokenResponse(string AccessToken);
+
+public sealed class TalerOrderNotFoundException(string orderId, Uri? requestUri, string? responseBody)
+    : HttpRequestException(
+        $"Taler order '{orderId}' was not found at {requestUri}. " +
+        $"Body: {(string.IsNullOrWhiteSpace(responseBody) ? "<empty>" : responseBody)}")
+{
+    public string OrderId { get; } = orderId;
+}
 
 public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantClient> logger)
 {
@@ -298,12 +308,28 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         var uri = BuildUri(baseUrl, "config");
         using var response = await httpClient.GetAsync(uri, cancellationToken);
         if (!response.IsSuccessStatusCode)
-            return new TalerConfig(false);
+            return new TalerConfig(false, null);
+
+        var serverHeader = response.Headers.TryGetValues("Server", out var serverValues)
+            ? serverValues.FirstOrDefault()
+            : null;
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+
+        logger.LogDebug("Taler merchant /config body: {Body}", json.RootElement.GetRawText());
+
         var selfProvisioning = json.RootElement.TryGetProperty("have_self_provisioning", out var sp) && sp.ValueKind == JsonValueKind.True;
-        return new TalerConfig(selfProvisioning);
+        var protocolVersion = json.RootElement.TryGetProperty("version", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+        // Prefer a human-readable release version over the libtool protocol version.
+        // Check known fields that different Taler merchant builds use.
+        string? releaseVersion =
+            ExtractVersionFromImplementationUrn(json.RootElement) ??
+            ExtractVersionFromServerHeader(serverHeader) ??
+            protocolVersion;
+
+        return new TalerConfig(selfProvisioning, releaseVersion);
     }
 
     /// <summary>
@@ -515,6 +541,13 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             }
         }
 
+        if (responseToUse.StatusCode == HttpStatusCode.NotFound)
+        {
+            var body = await responseToUse.Content.ReadAsStringAsync(cancellationToken);
+            if (IsUnknownOrderResponse(body))
+                throw new TalerOrderNotFoundException(orderId, responseToUse.RequestMessage?.RequestUri, body);
+        }
+
         await EnsureSuccessStatusCode(responseToUse, "get order status");
 
         await using var stream = await responseToUse.Content.ReadAsStreamAsync(cancellationToken);
@@ -599,6 +632,9 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
 
             var amount = GetOrderAmount(order);
             var createdAt = GetOrderCreationTime(order);
+            var orderStatusUrl = order.TryGetProperty("order_status_url", out var osuProp) && osuProp.ValueKind == JsonValueKind.String
+                ? osuProp.GetString()
+                : null;
 
             result.Add(new TalerOrderSummary(
                 orderId!,
@@ -611,7 +647,8 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                 amount,
                 refundAmount,
                 pendingRefundAmount,
-                createdAt));
+                createdAt,
+                orderStatusUrl));
         }
 
         return result;
@@ -636,10 +673,17 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                 {
                     logger.LogDebug("Taler orders response status {StatusCode} from {OrdersUri}", (int)response.StatusCode, uri);
                 }
-                else
+                else if (response.IsSuccessStatusCode)
                 {
                     logger.LogInformation(
-                        "Taler orders request recovered on attempt {Attempt}/{MaxAttempts} with status {StatusCode}",
+                        "Taler orders request recovered on attempt {Attempt}/{MaxAttempts}",
+                        attempt,
+                        maxAttempts);
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "Taler orders request attempt {Attempt}/{MaxAttempts} received error status {StatusCode}",
                         attempt,
                         maxAttempts,
                         (int)response.StatusCode);
@@ -662,6 +706,27 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
         }
 
         throw lastException ?? new HttpRequestException($"Orders request failed for {uri}");
+    }
+
+    /// <summary>
+    /// Fetches the order_status_url for a single order from the private order detail endpoint.
+    /// Inputs: backend URL, instance ID, API token, order ID.
+    /// Output: order_status_url string or null when not present / on error.
+    /// </summary>
+    public async Task<string?> GetOrderStatusUrlAsync(string baseUrl, string instanceId, string apiToken, string orderId, CancellationToken cancellationToken)
+    {
+        var uri = BuildInstancePrivateUri(baseUrl, instanceId, $"orders/{Uri.EscapeDataString(orderId)}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        AddAuthorization(request, apiToken);
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return null;
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        return json.RootElement.TryGetProperty("order_status_url", out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString()
+            : null;
     }
 
     /// <summary>
@@ -792,9 +857,19 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
             return;
 
         var body = await response.Content.ReadAsStringAsync();
+        string? hint = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("hint", out var hintProp) && hintProp.ValueKind == JsonValueKind.String)
+                hint = hintProp.GetString();
+        }
+        catch { /* ignore parse errors */ }
+
         var bodySnippet = body.Length <= 300 ? body : body[..300];
+        var detail = hint ?? bodySnippet;
         throw new HttpRequestException(
-            $"Taler merchant {operation} failed with {(int)response.StatusCode} ({response.StatusCode}) at {response.RequestMessage?.RequestUri}. Body: {bodySnippet}");
+            $"Taler merchant {operation} failed: {detail} (HTTP {(int)response.StatusCode} at {response.RequestMessage?.RequestUri})");
     }
 
     /// <summary>
@@ -802,6 +877,51 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
     /// Inputs: request object and token string.
     /// Output: mutated request headers.
     /// </summary>
+    /// <summary>
+    /// Extracts release version from a Taler implementation URN, e.g.
+    /// "urn:net.taler:merchant:C-v1.5.6" → "1.5.6".
+    /// </summary>
+    private static string? ExtractVersionFromImplementationUrn(JsonElement root)
+    {
+        if (!root.TryGetProperty("implementation", out var impl) || impl.ValueKind != JsonValueKind.String)
+            return null;
+        var urn = impl.GetString();
+        if (string.IsNullOrWhiteSpace(urn))
+            return null;
+        // Format: urn:net.taler:<name>:C-v<version>
+        var lastColon = urn.LastIndexOf(':');
+        if (lastColon < 0)
+            return null;
+        var tag = urn[(lastColon + 1)..];
+        // Strip leading "C-v", "v", or "C-" prefixes
+        foreach (var prefix in new[] { "C-v", "C-", "v" })
+        {
+            if (tag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var stripped = tag[prefix.Length..];
+                return stripped.Length > 0 && char.IsDigit(stripped[0]) ? stripped : null;
+            }
+        }
+        // Only return bare tag if it looks like a version number
+        return tag.Length > 0 && char.IsDigit(tag[0]) ? tag : null;
+    }
+
+    /// <summary>
+    /// Extracts version from an HTTP Server header, e.g.
+    /// "taler-merchant/1.5.6" → "1.5.6".
+    /// </summary>
+    private static string? ExtractVersionFromServerHeader(string? serverHeader)
+    {
+        if (string.IsNullOrWhiteSpace(serverHeader))
+            return null;
+        var slash = serverHeader.IndexOf('/', StringComparison.Ordinal);
+        if (slash < 0 || slash == serverHeader.Length - 1)
+            return null;
+        var version = serverHeader[(slash + 1)..].Trim();
+        // Only return if it looks like a version (starts with a digit)
+        return version.Length > 0 && char.IsDigit(version[0]) ? version : null;
+    }
+
     private static void AddAuthorization(HttpRequestMessage request, string apiToken)
     {
         if (string.IsNullOrWhiteSpace(apiToken))
@@ -853,6 +973,25 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                                     string.Equals(prop.GetString(), "1", StringComparison.OrdinalIgnoreCase),
             _ => false
         };
+    }
+
+    private static bool IsUnknownOrderResponse(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return false;
+
+        try
+        {
+            using var json = JsonDocument.Parse(body);
+            if (!json.RootElement.TryGetProperty("code", out var codeProp) || codeProp.ValueKind != JsonValueKind.Number)
+                return false;
+
+            return codeProp.TryGetInt32(out var code) && code == 2005;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
