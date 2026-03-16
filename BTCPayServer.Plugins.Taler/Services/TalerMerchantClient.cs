@@ -42,6 +42,7 @@ public record TalerOrderSummary(
     bool Wired,
     bool RefundPending,
     bool PaymentFailed,
+    bool Refunded,
     string? OrderStatus,
     string? Amount,
     string? RefundAmount,
@@ -629,6 +630,8 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
 
             var paymentFailed = string.Equals(orderStatus, "payment-failed", StringComparison.OrdinalIgnoreCase) ||
                                 string.Equals(orderStatus, "failed", StringComparison.OrdinalIgnoreCase);
+            var refunded = ParseBooleanLike(order, "refunded") ||
+                           (!string.IsNullOrWhiteSpace(refundAmount) && !IsZeroAmount(refundAmount) && !refundPending);
 
             var amount = GetOrderAmount(order);
             var createdAt = GetOrderCreationTime(order);
@@ -643,6 +646,7 @@ public class TalerMerchantClient(HttpClient httpClient, ILogger<TalerMerchantCli
                 wired,
                 refundPending,
                 paymentFailed,
+                refunded,
                 orderStatus,
                 amount,
                 refundAmount,

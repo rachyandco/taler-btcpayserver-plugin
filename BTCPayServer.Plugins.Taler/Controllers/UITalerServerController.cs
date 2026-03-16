@@ -5,7 +5,6 @@ using System;
 using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using System.Text.RegularExpressions;
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
@@ -17,7 +16,6 @@ using BTCPayServer.Plugins.Taler.Controllers.ViewModels;
 using BTCPayServer.Plugins.Taler.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 
 namespace BTCPayServer.Plugins.Taler.Controllers;
 
@@ -26,15 +24,10 @@ namespace BTCPayServer.Plugins.Taler.Controllers;
 [Authorize(Policy = Policies.CanModifyServerSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 public class UITalerServerController(
     ISettingsRepository settingsRepository,
-    TalerMerchantClient talerMerchantClient,
-    ILogger<UITalerServerController> logger) : Controller
+    TalerMerchantClient talerMerchantClient) : Controller
 {
     private const string SecretMask = "***";
     private const string NewlyGeneratedTokenKey = "Taler_NewlyGeneratedToken";
-    private const string PendingRefundOrderIdKey = "Taler_PendingRefundOrderId";
-    private const string OrderActionOrderIdKey = "Taler_OrderActionOrderId";
-    private const string OrderActionMessageKey = "Taler_OrderActionMessage";
-    private const string OrderActionSeverityKey = "Taler_OrderActionSeverity";
 
     [HttpGet]
     /// <summary>
@@ -42,7 +35,7 @@ public class UITalerServerController(
     /// Inputs: persisted settings and optional merchant connectivity.
     /// Output: settings view model rendered in the Taler server UI.
     /// </summary>
-    public async Task<IActionResult> GetServerConfig(int ordersPage = 1)
+    public async Task<IActionResult> GetServerConfig()
     {
         var settings = await GetSettings();
         if (string.IsNullOrWhiteSpace(settings.MerchantBaseUrl))
@@ -50,8 +43,6 @@ public class UITalerServerController(
         if (string.IsNullOrWhiteSpace(settings.MerchantInstanceId))
             settings.MerchantInstanceId = "default";
         var vm = Map(settings);
-        vm.OrdersPage = Math.Max(1, ordersPage);
-        PopulateOrderUiState(vm);
         if (TempData.TryGetValue(NewlyGeneratedTokenKey, out var newToken))
             vm.NewlyGeneratedToken = newToken?.ToString();
         if (!string.IsNullOrWhiteSpace(settings.MerchantBaseUrl))
@@ -455,167 +446,6 @@ public class UITalerServerController(
         return RedirectToAction(nameof(GetServerConfig));
     }
 
-    [HttpPost("orders/{orderId}/refund")]
-    [ValidateAntiForgeryToken]
-    /// <summary>
-    /// Triggers order refund through merchant private API.
-    /// Inputs: order ID and backend credentials from form/settings.
-    /// Output: redirect with operation status.
-    /// </summary>
-    public async Task<IActionResult> RefundOrder(
-        string orderId,
-        string? refundAmount,
-        bool confirmRefund = false,
-        bool cancelRefund = false,
-        TalerServerConfigViewModel? form = null,
-        int ordersPage = 1)
-    {
-        if (string.IsNullOrWhiteSpace(orderId))
-        {
-            SetOrderActionResult(orderId, "Invalid order identifier.", StatusMessageModel.StatusSeverity.Error);
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        if (cancelRefund)
-        {
-            ClearPendingRefund(orderId);
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        if (!confirmRefund)
-        {
-            SetPendingRefund(orderId);
-            ClearOrderActionResult();
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        var settings = await GetSettings();
-        var (baseUrl, instanceId, apiToken) = ResolveBackendAccess(form, settings);
-        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(apiToken))
-        {
-            SetOrderActionResult(
-                orderId,
-                "Set merchant base URL, instance ID and API token before refunding an order.",
-                StatusMessageModel.StatusSeverity.Error);
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        try
-        {
-            ClearPendingRefund(orderId);
-            var orders = await talerMerchantClient.GetOrdersAsync(baseUrl, instanceId, apiToken, HttpContext.RequestAborted);
-            var currentOrder = orders.FirstOrDefault(o => string.Equals(o.OrderId, orderId, StringComparison.OrdinalIgnoreCase));
-            if (currentOrder is null)
-            {
-                SetOrderActionResult(orderId, $"Order {orderId} was not found.", StatusMessageModel.StatusSeverity.Error);
-                return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-            }
-
-            if (!currentOrder.Refundable || currentOrder.Wired || currentOrder.RefundPending)
-            {
-                SetOrderActionResult(
-                    orderId,
-                    $"Order {orderId} is no longer refundable (already wired, refund pending, or refund window expired).",
-                    StatusMessageModel.StatusSeverity.Error);
-                return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-            }
-
-            var effectiveRefundAmount = string.IsNullOrWhiteSpace(refundAmount) ? null : refundAmount.Trim();
-            if (string.IsNullOrWhiteSpace(effectiveRefundAmount))
-            {
-                // Fallback: resolve amount from current backend order snapshot.
-                effectiveRefundAmount = currentOrder.Amount;
-            }
-
-            if (string.IsNullOrWhiteSpace(effectiveRefundAmount))
-            {
-                SetOrderActionResult(
-                    orderId,
-                    $"Could not determine refund amount for order {orderId}.",
-                    StatusMessageModel.StatusSeverity.Error);
-                return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-            }
-
-            await talerMerchantClient.RefundOrderAsync(
-                baseUrl,
-                instanceId,
-                apiToken,
-                orderId.Trim(),
-                effectiveRefundAmount,
-                HttpContext.RequestAborted);
-            SetOrderActionResult(orderId, $"Refund requested for order {orderId}.", StatusMessageModel.StatusSeverity.Success);
-        }
-        catch (HttpRequestException ex)
-        {
-            if (ex.Message.Contains("\"code\": 2169", StringComparison.OrdinalIgnoreCase) ||
-                ex.Message.Contains("past the wire transfer deadline", StringComparison.OrdinalIgnoreCase))
-            {
-                SetOrderActionResult(
-                    orderId,
-                    $"Order {orderId} is past wire deadline and cannot be refunded via Taler API.",
-                    StatusMessageModel.StatusSeverity.Error);
-                return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-            }
-
-            var friendly = BuildFriendlyRefundError(orderId, ex.Message);
-            SetOrderActionResult(orderId, friendly, StatusMessageModel.StatusSeverity.Error);
-        }
-
-        return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-    }
-
-    [HttpPost("orders/{orderId}/abort")]
-    [ValidateAntiForgeryToken]
-    /// <summary>
-    /// Aborts failed order through merchant private API.
-    /// Inputs: order ID and backend credentials from form/settings.
-    /// Output: redirect with operation status.
-    /// </summary>
-    public async Task<IActionResult> AbortOrder(string orderId, TalerServerConfigViewModel? form, int ordersPage = 1)
-    {
-        if (string.IsNullOrWhiteSpace(orderId))
-        {
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = "Invalid order identifier.",
-                Severity = StatusMessageModel.StatusSeverity.Error
-            });
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        var settings = await GetSettings();
-        var (baseUrl, instanceId, apiToken) = ResolveBackendAccess(form, settings);
-        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(apiToken))
-        {
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = "Set merchant base URL, instance ID and API token before aborting an order.",
-                Severity = StatusMessageModel.StatusSeverity.Error
-            });
-            return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-        }
-
-        try
-        {
-            await talerMerchantClient.AbortOrderAsync(baseUrl, instanceId, apiToken, orderId.Trim(), HttpContext.RequestAborted);
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = $"Abort requested for order {orderId}.",
-                Severity = StatusMessageModel.StatusSeverity.Success
-            });
-        }
-        catch (HttpRequestException ex)
-        {
-            TempData.SetStatusMessageModel(new StatusMessageModel
-            {
-                Message = $"Failed to abort order {orderId}: {ex.Message}",
-                Severity = StatusMessageModel.StatusSeverity.Error
-            });
-        }
-
-        return RedirectToAction(nameof(GetServerConfig), new { ordersPage });
-    }
-
     [HttpPost("kyc/accept-tos")]
     [ValidateAntiForgeryToken]
     /// <summary>
@@ -827,74 +657,6 @@ public class UITalerServerController(
             vm.KycError = ex.Message;
         }
 
-        try
-        {
-            logger.LogInformation(
-                "Loading Taler orders for settings page. BaseUrl={BaseUrl} InstanceId={InstanceId} Page={Page}",
-                baseUrl,
-                instanceId,
-                vm.OrdersPage);
-            var orders = await talerMerchantClient.GetOrdersAsync(baseUrl, instanceId, apiToken, HttpContext.RequestAborted);
-            vm.Orders = orders
-                .Select(o => new TalerOrderViewModel
-                {
-                    OrderId = o.OrderId,
-                    Paid = o.Paid,
-                    Refundable = o.Refundable,
-                    Wired = o.Wired,
-                    RefundPending = o.RefundPending,
-                    PaymentFailed = o.PaymentFailed,
-                    OrderStatus = o.OrderStatus,
-                    Amount = o.Amount,
-                    RefundAmount = o.RefundAmount,
-                    PendingRefundAmount = o.PendingRefundAmount,
-                    CreatedAt = o.CreatedAt,
-                    OrderStatusUrl = o.OrderStatusUrl
-                })
-                .ToList();
-
-            var ordered = vm.Orders
-                .OrderByDescending(o => o.CreatedAt ?? DateTimeOffset.MinValue)
-                .ThenByDescending(o => o.OrderId, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            vm.OrdersTotalCount = ordered.Count;
-            vm.OrdersTotalPages = Math.Max(1, (vm.OrdersTotalCount + vm.OrdersPageSize - 1) / vm.OrdersPageSize);
-            vm.OrdersPage = Math.Min(Math.Max(1, vm.OrdersPage), vm.OrdersTotalPages);
-            vm.Orders = ordered
-                .Skip((vm.OrdersPage - 1) * vm.OrdersPageSize)
-                .Take(vm.OrdersPageSize)
-                .ToList();
-
-            // Enrich current page with order_status_url from individual endpoint for orders that didn't have it in the list.
-            var enrichTasks = vm.Orders
-                .Where(o => string.IsNullOrWhiteSpace(o.OrderStatusUrl))
-                .Select(async o =>
-                {
-                    try
-                    {
-                        o.OrderStatusUrl = await talerMerchantClient.GetOrderStatusUrlAsync(
-                            baseUrl, instanceId, apiToken, o.OrderId, HttpContext.RequestAborted);
-                    }
-                    catch
-                    {
-                        // best-effort; leave null
-                    }
-                });
-            await Task.WhenAll(enrichTasks);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                "Failed loading Taler orders for settings page. BaseUrl={BaseUrl} InstanceId={InstanceId}: {Error}",
-                baseUrl,
-                instanceId,
-                ex.Message);
-            vm.OrdersError = ex.Message;
-            vm.OrdersTotalCount = 0;
-            vm.OrdersTotalPages = 1;
-            vm.OrdersPage = 1;
-        }
     }
 
     /// <summary>
@@ -929,62 +691,6 @@ public class UITalerServerController(
             return currentValue;
 
         return trimmed;
-    }
-
-    private void PopulateOrderUiState(TalerServerConfigViewModel vm)
-    {
-        vm.PendingRefundOrderId = TempData.TryGetValue(PendingRefundOrderIdKey, out var pending) ? pending?.ToString() : null;
-        vm.OrderActionOrderId = TempData.TryGetValue(OrderActionOrderIdKey, out var orderId) ? orderId?.ToString() : null;
-        vm.OrderActionMessage = TempData.TryGetValue(OrderActionMessageKey, out var message) ? message?.ToString() : null;
-        vm.OrderActionSeverity = TempData.TryGetValue(OrderActionSeverityKey, out var severity) ? severity?.ToString() : null;
-    }
-
-    private void SetPendingRefund(string orderId)
-    {
-        TempData[PendingRefundOrderIdKey] = orderId;
-    }
-
-    private void ClearPendingRefund(string orderId)
-    {
-        if (TempData.TryGetValue(PendingRefundOrderIdKey, out var pending) &&
-            string.Equals(pending?.ToString(), orderId, StringComparison.OrdinalIgnoreCase))
-        {
-            TempData.Remove(PendingRefundOrderIdKey);
-        }
-    }
-
-    private void ClearOrderActionResult()
-    {
-        TempData.Remove(OrderActionOrderIdKey);
-        TempData.Remove(OrderActionMessageKey);
-        TempData.Remove(OrderActionSeverityKey);
-    }
-
-    private void SetOrderActionResult(string orderId, string message, StatusMessageModel.StatusSeverity severity)
-    {
-        TempData[OrderActionOrderIdKey] = orderId;
-        TempData[OrderActionMessageKey] = message;
-        TempData[OrderActionSeverityKey] = severity == StatusMessageModel.StatusSeverity.Success ? "success" : "error";
-    }
-
-    private static string BuildFriendlyRefundError(string orderId, string rawMessage)
-    {
-        if (rawMessage.Contains("\"code\": 22", StringComparison.OrdinalIgnoreCase) ||
-            rawMessage.Contains("\"field\": \"reason\"", StringComparison.OrdinalIgnoreCase) ||
-            rawMessage.Contains("\"field\": \"refund\"", StringComparison.OrdinalIgnoreCase))
-        {
-            return $"Refund request for order {orderId} was rejected by merchant (invalid refund payload).";
-        }
-
-        var hintMatch = Regex.Match(rawMessage, "\"hint\"\\s*:\\s*\"(?<hint>.*?)\"", RegexOptions.IgnoreCase);
-        if (hintMatch.Success)
-        {
-            var hint = hintMatch.Groups["hint"].Value;
-            if (!string.IsNullOrWhiteSpace(hint))
-                return $"Refund failed for order {orderId}: {hint}";
-        }
-
-        return $"Refund failed for order {orderId}. Merchant backend returned an error.";
     }
 
     /// <summary>
