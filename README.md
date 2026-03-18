@@ -177,7 +177,3 @@ docker run --rm --network generated_default curlimages/curl:8.12.1 -sS \
 
 ## License
 GPLv3. See `LICENSE`.
-
-
-
-secret-token:HNCXD6RXP2P40M1F40Y6TCF7V9228NM44WWPH04JNXQP5JV7WMJ0
