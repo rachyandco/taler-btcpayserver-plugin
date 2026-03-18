@@ -51,7 +51,7 @@ public class TalerPaymentMethodHandler(
         var amountValue = Math.Round(due, configurationItem.Divisibility, MidpointRounding.AwayFromZero);
         var amount = $"{configurationItem.AssetCode}:{amountValue.ToString(CultureInfo.InvariantCulture)}";
         var orderId = $"{Guid.NewGuid():N}-{configurationItem.AssetCode}";
-        var summary = $"BTCPay payment ({configurationItem.AssetCode})";
+        var summary = $"{context.Store.StoreName} ({configurationItem.AssetCode})";
 
         string createdOrderId;
         try
