@@ -16,11 +16,11 @@
 @{
     var storeId = ScopeProvider.GetCurrentStoreId()
                   ?? ViewContext.RouteData.Values["storeId"]?.ToString()
-                  ?? Context.GetStoreData()?.Id;
+                  ?? Context.GetStoreDataOrNull()?.Id;
 }
 @if (SignInManager.IsSignedIn(User) && TalerPluginConfiguration.AssetConfigurationItems.Any())
 {
-    var store = Context.GetStoreData();
+    var store = Context.GetStoreDataOrNull();
     var result = UITalerStore.GetVM(store);
 
     foreach (var item in result.Items)

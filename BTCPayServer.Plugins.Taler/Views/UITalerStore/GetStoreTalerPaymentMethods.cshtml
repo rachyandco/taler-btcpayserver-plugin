@@ -4,7 +4,7 @@
 @model BTCPayServer.Plugins.Taler.Controllers.ViewModels.ViewTalerStoreOptionsViewModel
 @{
     ViewData["Title"] = "Taler";
-    var storeId = ViewContext.RouteData.Values["storeId"]?.ToString() ?? Context.GetStoreData()?.Id;
+    var storeId = ViewContext.RouteData.Values["storeId"]?.ToString() ?? Context.GetStoreDataOrNull()?.Id;
 }
 
 <h2 class="mb-4">Taler assets</h2>
