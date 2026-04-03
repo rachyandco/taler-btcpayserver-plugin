@@ -322,6 +322,7 @@ public class UITalerStoreController(
                 asset.MerchantBaseUrl, asset.MerchantInstanceId, asset.ApiToken, HttpContext.RequestAborted);
 
             var mapped = orders
+                .Where(o => o.Amount?.StartsWith(asset.AssetCode + ":", StringComparison.OrdinalIgnoreCase) == true)
                 .Select(o => new TalerOrderViewModel
                 {
                     OrderId = o.OrderId,
